@@ -320,14 +320,14 @@ function hasRecipientReplied(threadId) {
    Feature 4 – Vercel Cron Trigger
    ────────────────────────────────────────────── */
 
-function triggerVercelCron() {
+function triggerRenderCron() {
   try {
-    // Pings your Vercel URL to process the queue
-    var response = UrlFetchApp.fetch("https://streakclone.vercel.app/api/cron/process", {
+    // Pings your Render URL to process the queue
+    var response = UrlFetchApp.fetch("https://stroke-25mz.onrender.com/api/cron/process", {
       method: "get",
       muteHttpExceptions: true
     });
-    Logger.log("Vercel Ping Response: " + response.getContentText());
+    Logger.log("Render Ping Response: " + response.getContentText());
   } catch (e) {
     Logger.log("Error pinging cron: " + e.toString());
   }

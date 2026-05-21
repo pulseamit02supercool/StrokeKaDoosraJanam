@@ -7,5 +7,5 @@ const STROKE_CONFIG = {
   GOOGLE_CLIENT_ID: '21707791014-53qlivbv153321g36pvqgk8ml4kv7v8e.apps.googleusercontent.com',
   // Render backend URL — replace with your actual Render deployment URL
   // Leave empty string '' to use same-origin (for local dev or single-host deployments)
-  API_BASE: 'https://stroke-25mz.onrender.com'
+  API_BASE: ''
 };
