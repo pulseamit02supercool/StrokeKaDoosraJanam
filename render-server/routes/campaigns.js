@@ -789,4 +789,136 @@ router.post('/backup', async (req, res) => {
   }
 });
 
+// ── POST /api/campaigns/backup-doc ──
+router.post('/backup-doc', async (req, res) => {
+  try {
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const tokenPayload = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!tokenPayload || !tokenPayload.id) return res.status(401).json({ error: 'Invalid token' });
+
+    const { campaignId } = req.body;
+    if (!campaignId) return res.status(400).json({ error: 'Missing campaignId' });
+
+    // Verify campaign ownership and fetch
+    const { data: campaign, error: campErr } = await supabase
+      .from('campaigns')
+      .select('*')
+      .eq('id', campaignId)
+      .eq('user_id', tokenPayload.id)
+      .single();
+
+    if (campErr || !campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Fetch associated emails
+    const { data: emails, error: emailErr } = await supabase
+      .from('emails')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('scheduled_at', { ascending: true });
+
+    if (emailErr) throw emailErr;
+
+    // Fetch user refresh token
+    const { data: user, error: userErr } = await supabase
+      .from('users')
+      .select('refresh_token')
+      .eq('id', tokenPayload.id)
+      .single();
+
+    if (userErr || !user || !user.refresh_token) {
+      return res.status(400).json({ error: 'OAuth credentials not found. Please log in again.' });
+    }
+
+    // Connect to Google Docs API
+    const oAuth2Client = getOAuthClient(req);
+    oAuth2Client.setCredentials({ refresh_token: user.refresh_token });
+    const docs = google.docs({ version: 'v1', auth: oAuth2Client });
+
+    // Create Document
+    const dateStr = new Date(campaign.created_at).toLocaleDateString();
+    const docTitle = `Stroke Campaign Outline: ${campaign.subject_template || 'Campaign'} (${dateStr})`;
+    const document = await docs.documents.create({
+      requestBody: {
+        title: docTitle
+      }
+    });
+
+    const documentId = document.data.documentId;
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    // Construct text outline
+    let bodyText = `STROKE CRM CAMPAIGN OUTLINE & HISTORY\n` +
+                   `===================================\n` +
+                   `Campaign ID: ${campaign.id}\n` +
+                   `Subject Template: ${campaign.subject_template || 'N/A'}\n` +
+                   `Created At: ${new Date(campaign.created_at).toLocaleString()}\n` +
+                   `Status: ${campaign.status}\n\n` +
+                   `CAMPAIGN BODY TEMPLATE\n` +
+                   `----------------------\n` +
+                   `${campaign.body_template || 'N/A'}\n\n`;
+
+    if (campaign.followup_config && Array.isArray(campaign.followup_config) && campaign.followup_config.length > 0) {
+      bodyText += `FOLLOW-UP SEQUENCE CONFIGURATION\n` +
+                  `-------------------------------\n`;
+      campaign.followup_config.forEach((step, idx) => {
+        bodyText += `Step ${idx + 1}: Send after ${step.dayOffset || 1} day(s) at ${step.time || '10:00'}\n` +
+                    `Body:\n${step.bodyTemplate || ''}\n` +
+                    `-------------------------------\n`;
+      });
+      bodyText += `\n`;
+    }
+
+    bodyText += `RECIPIENT SEND LOGS & OUTLINE\n` +
+                `-----------------------------\n`;
+
+    if (!emails || emails.length === 0) {
+      bodyText += `No emails sent or scheduled for this campaign.\n`;
+    } else {
+      emails.forEach((e, idx) => {
+        bodyText += `[${idx + 1}] Recipient: ${e.to_email}\n` +
+                    `    Subject: ${e.subject || 'N/A'}\n` +
+                    `    Status: ${e.status || 'pending'}\n` +
+                    `    Is Follow-up: ${e.is_followup ? 'Yes' : 'No'}\n` +
+                    `    Scheduled At: ${e.scheduled_at ? new Date(e.scheduled_at).toLocaleString() : 'N/A'}\n` +
+                    `    Sent At: ${e.sent_at ? new Date(e.sent_at).toLocaleString() : 'N/A'}\n` +
+                    `    Thread ID: ${e.thread_id || 'N/A'}\n`;
+        if (e.error) {
+          bodyText += `    Error Logs: ${e.error}\n`;
+        }
+        bodyText += `\n`;
+      });
+    }
+
+    // Insert text into the Google Doc
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: bodyText
+            }
+          }
+        ]
+      }
+    });
+
+    res.status(200).json({ success: true, url: docUrl, id: documentId });
+
+  } catch (err) {
+    console.error('Google Doc backup error:', err);
+    res.status(500).json({ error: 'Failed to create Google Doc backup', details: err.message });
+  }
+});
+
 module.exports = router;

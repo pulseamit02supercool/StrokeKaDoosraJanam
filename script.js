@@ -85,7 +85,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCancelEditSig = $('btn-cancel-edit-sig');
   const btnCloseSigModal = $('btn-close-sig-modal');
   const sigEditorTitle= $('sig-editor-title');
-  
+
+  // Template Elements
+  const templateSelect = $('template-select');
+  const btnManageTemplates = $('btn-manage-templates');
+  const templateModal = $('template-modal');
+  const templateList = $('template-list');
+  const templateName = $('template-name');
+  const btnSaveTemplate = $('btn-save-template');
+  const btnCloseTemplateModal = $('btn-close-template-modal');
+  const templateSaveStatus = $('template-save-status');
+
   const manageSection = $('manage-section');
   const campaignsTbody = $('campaigns-tbody');
   const editCampModal = $('edit-campaign-modal');
@@ -149,8 +159,9 @@ document.addEventListener('DOMContentLoaded', () => {
     signedInView.style.display = 'flex';
     btnSend.disabled = false;
 
-    // Load saved signatures
+    // Load saved signatures and templates
     fetchSignatures();
+    fetchTemplates();
     fetchCampaigns();
     startBackgroundWorker();
     
@@ -611,6 +622,185 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   /* ──────────────────────────────────
+     Campaign Templates Manager (Google Docs)
+     ────────────────────────────────── */
+  let userTemplates = [];
+
+  async function fetchTemplates() {
+    try {
+      const res = await apiFetch('/api/users/templates');
+      if (!res.ok) throw new Error('Failed to fetch templates');
+      userTemplates = await res.json();
+      
+      // Update template selection dropdown
+      const selectedId = templateSelect.value;
+      templateSelect.innerHTML = '<option value="">-- Start from Scratch --</option>' +
+        userTemplates.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+      
+      // Restore selected value if it still exists
+      if (userTemplates.some(t => t.id === selectedId)) {
+        templateSelect.value = selectedId;
+      } else {
+        templateSelect.value = '';
+      }
+      
+      renderTemplateList();
+    } catch (err) {
+      console.error('Error fetching templates:', err);
+    }
+  }
+
+  function renderTemplateList() {
+    if (!userTemplates.length) {
+      templateList.innerHTML = '<li style="opacity:0.5; padding:8px;">No templates found. Save one below!</li>';
+      return;
+    }
+    templateList.innerHTML = userTemplates.map(t => `
+      <li style="display:flex; justify-content:space-between; align-items:center; padding:0.5rem; border-bottom:1px solid var(--border-color); gap: 10px;">
+        <span style="font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px;">
+          ${escapeHtml(t.name)}
+        </span>
+        <div style="display:flex; gap:6px;">
+          <a href="${t.doc_url}" target="_blank" class="btn btn-ghost btn-sm" style="color:var(--primary-color);">📄 View Doc</a>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="window.deleteTemplate('${t.id}')">Delete</button>
+        </div>
+      </li>
+    `).join('');
+  }
+
+  btnManageTemplates.addEventListener('click', () => {
+    templateModal.style.display = 'block';
+    templateName.value = '';
+    templateSaveStatus.style.display = 'none';
+  });
+
+  btnCloseTemplateModal.addEventListener('click', () => {
+    templateModal.style.display = 'none';
+  });
+
+  // Handle template selection change (load template)
+  templateSelect.addEventListener('change', async () => {
+    const templateId = templateSelect.value;
+    if (!templateId) return; // Start from scratch
+    
+    const originalText = templateSelect.options[templateSelect.selectedIndex].text;
+    templateSelect.options[templateSelect.selectedIndex].text = `⏳ Loading...`;
+    templateSelect.disabled = true;
+    
+    try {
+      const res = await apiFetch(`/api/users/templates?id=${templateId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load template');
+      
+      // Inject subject, CC, body
+      subjectTpl.value = data.subjectTemplate || '';
+      const ccEl = $('cc-emails');
+      if (ccEl) ccEl.value = data.ccTemplate || '';
+      
+      if (bodyEditor) {
+        bodyEditor.innerHTML = data.bodyTemplate || '';
+      }
+      
+      // Inject follow-ups
+      if (Array.isArray(data.followups)) {
+        followupDrafts = data.followups;
+        followupCount.value = data.followups.length;
+      } else {
+        followupDrafts = [];
+        followupCount.value = 0;
+      }
+      
+      // Rebuild and refresh follow-up UI and live preview
+      renderFollowupBuilder();
+      renderPreview();
+      
+    } catch (err) {
+      console.error(err);
+      alert('Error loading template: ' + err.message + '\n\nMake sure your Google authentication is active!');
+    } finally {
+      templateSelect.options[templateSelect.selectedIndex].text = originalText;
+      templateSelect.disabled = false;
+    }
+  });
+
+  // Save current composer state as template
+  btnSaveTemplate.addEventListener('click', async () => {
+    const name = templateName.value.trim();
+    if (!name) return alert('Please enter a template name.');
+    
+    btnSaveTemplate.disabled = true;
+    templateSaveStatus.style.color = 'var(--text-color)';
+    templateSaveStatus.style.display = 'inline';
+    templateSaveStatus.textContent = '⏳ Saving to Google Docs...';
+    
+    try {
+      // Gather active composer values
+      const subjectTemplate = subjectTpl.value || '';
+      const ccTemplate = $('cc-emails')?.value || '';
+      const bodyTemplate = getEditorHtml(bodyEditor);
+      const followups = followupDrafts; // Sync is run on any input in the builder
+      
+      const res = await apiFetch('/api/users/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          subjectTemplate,
+          bodyTemplate,
+          ccTemplate,
+          followups
+        })
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save template');
+      
+      templateSaveStatus.style.color = 'var(--success)';
+      templateSaveStatus.textContent = '🟢 Saved successfully!';
+      templateName.value = '';
+      
+      await fetchTemplates();
+      
+      // Pre-select the newly saved template in the dropdown
+      if (data.id) {
+        templateSelect.value = data.id;
+      }
+      
+      setTimeout(() => {
+        templateSaveStatus.style.display = 'none';
+      }, 4000);
+      
+    } catch (err) {
+      console.error(err);
+      templateSaveStatus.style.color = 'var(--danger)';
+      templateSaveStatus.textContent = '❌ Error saving template';
+      alert('Error saving template: ' + err.message + '\n\nMake sure to sign out and log back in to authorize Google Docs API!');
+    } finally {
+      btnSaveTemplate.disabled = false;
+    }
+  });
+
+  window.deleteTemplate = async (id) => {
+    if (!confirm('Are you sure you want to delete this template index from Stroke?\n(The Google Doc will remain in your Google Drive for your safety)')) return;
+    
+    try {
+      const res = await apiFetch('/api/users/templates', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete template');
+      }
+      await fetchTemplates();
+    } catch (err) {
+      console.error(err);
+      alert('Error deleting template: ' + err.message);
+    }
+  };
+
+  /* ──────────────────────────────────
      Action toggle
      ────────────────────────────────── */
   actionSel.addEventListener('change', () => {
@@ -900,7 +1090,8 @@ document.addEventListener('DOMContentLoaded', () => {
        
        let manageBtn = `<div style="display:flex; gap:10px; align-items:center;">
           <a href="${STROKE_API_BASE}/api/campaigns/export?campaignId=${c.id}" target="_blank" class="btn btn-ghost btn-sm" title="Download Send Log (includes threadId)">⬇ CSV</a>
-          <button class="btn btn-ghost btn-sm" onclick="window.backupToGoogleSheets('${c.id}', this)" title="Backup to Google Sheets">☁️ Backup</button>`;
+          <button class="btn btn-ghost btn-sm" onclick="window.backupToGoogleSheets('${c.id}', this)" title="Backup to Google Sheets">☁️ Backup</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.backupToGoogleDocs('${c.id}', this)" title="Outline to Google Docs">📄 Docs</button>`;
           
        if (c.status !== 'cancelled' && (c.pending > 0)) {
           manageBtn += `<button class="btn btn-ghost btn-sm" onclick="window.openEditCampaign('${c.id}')">Edit</button></div>`;
@@ -1131,6 +1322,42 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error(err);
       alert('Error backing up to Google Sheets: ' + err.message + '\n\nMake sure to sign out and log back in to authorize the Google Sheets permissions!');
+      buttonEl.innerHTML = originalHtml;
+      buttonEl.disabled = false;
+    }
+  };
+
+  window.backupToGoogleDocs = async (campaignId, buttonEl) => {
+    const originalHtml = buttonEl.innerHTML;
+    buttonEl.disabled = true;
+    buttonEl.innerHTML = `⏳ Backing up...`;
+
+    try {
+      const res = await apiFetch('/api/campaigns/backup-doc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create doc');
+
+      buttonEl.innerHTML = `🟢 Doc Created!`;
+      buttonEl.classList.remove('btn-ghost');
+      buttonEl.classList.add('btn-primary');
+      
+      window.open(data.url, '_blank');
+      
+      setTimeout(() => {
+        buttonEl.innerHTML = originalHtml;
+        buttonEl.classList.add('btn-ghost');
+        buttonEl.classList.remove('btn-primary');
+        buttonEl.disabled = false;
+      }, 5000);
+
+    } catch (err) {
+      console.error(err);
+      alert('Error outlining to Google Docs: ' + err.message + '\n\nMake sure to sign out and log back in to authorize the Google Docs permissions!');
       buttonEl.innerHTML = originalHtml;
       buttonEl.disabled = false;
     }

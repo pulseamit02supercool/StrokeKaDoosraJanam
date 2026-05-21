@@ -119,6 +119,16 @@
             <div id="var-chips" class="chip-list"></div>
           </div>
 
+          <div class="field" id="template-selection-group">
+            <label>Campaign Template <small>(Backed by Google Docs)</small></label>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <select id="template-select" style="flex:1;">
+                <option value="">-- Start from Scratch --</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" id="btn-manage-templates">Manage Templates</button>
+            </div>
+          </div>
+
           <div class="field" id="subject-group">
             <label for="subject-tpl">Subject Template</label>
             <input type="text" id="subject-tpl" placeholder="Hey {{name}}, quick note about {{company}}" />
@@ -299,6 +309,40 @@
         <div style="display:flex; gap:10px; justify-content:flex-end;">
           <button class="btn btn-ghost" id="btn-cancel-edit-sig" style="display:none;">Cancel Edit</button>
           <button class="btn btn-primary" id="btn-save-sig">Save Signature</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Template Modal -->
+  <div id="template-modal" class="modal" style="display:none;">
+    <div class="modal-content card glass" style="max-width:600px; margin: 10% auto; position:relative; padding:2rem;">
+      <button class="icon-btn" id="btn-close-template-modal" style="position:absolute; top:1rem; right:1rem; font-size:1.5rem; width:30px; height:30px; line-height:0;">&times;</button>
+      <h3 style="margin-top:0;">Manage Templates</h3>
+      <p style="font-size:0.85rem; opacity:0.8; margin-top:-0.5rem; margin-bottom:1rem;">
+        Templates are stored securely as documents on your personal Google Drive and indexed via Supabase.
+      </p>
+      
+      <div id="template-list-container" style="max-height:220px; overflow-y:auto; margin-bottom:1.5rem; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.5rem; background:rgba(0,0,0,0.2);">
+        <ul id="template-list" style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:8px;">
+          <li style="opacity:0.5; padding:8px;">Loading templates...</li>
+        </ul>
+      </div>
+
+      <div style="border-top:1px solid var(--border-color); padding-top:1rem;">
+        <h4 style="margin-top:0; margin-bottom:10px;">Save Current Composer as Template</h4>
+        <p style="font-size:0.8rem; opacity:0.7; margin-bottom:12px;">
+          This saves the Subject, CC, Body editor formatting, and all configured threaded/bulk follow-up steps into a new Google Doc.
+        </p>
+        
+        <div class="field">
+          <label>Template Name</label>
+          <input type="text" id="template-name" placeholder="e.g. Sales Outreach V1" />
+        </div>
+        
+        <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:15px;">
+          <span id="template-save-status" style="font-size:0.9rem; align-self:center; margin-right:auto; display:none;"></span>
+          <button class="btn btn-primary" id="btn-save-template">Save Current Form</button>
         </div>
       </div>
     </div>
