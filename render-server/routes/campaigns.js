@@ -1,5 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
+const { google } = require('googleapis');
+const { getOAuthClient } = require('../lib/gmail');
 const { supabase } = require('../lib/supabase');
 const { getUTCFromIST } = require('../lib/timezone');
 
@@ -677,6 +679,113 @@ router.post('/emails/update-status', async (req, res) => {
   } catch (err) {
     console.error('Update email status error:', err);
     res.status(500).json({ error: 'Failed to update email status' });
+  }
+});
+
+// ── POST /api/campaigns/backup ──
+router.post('/backup', async (req, res) => {
+  try {
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const tokenPayload = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!tokenPayload || !tokenPayload.id) return res.status(401).json({ error: 'Invalid token' });
+
+    const { campaignId } = req.body;
+    if (!campaignId) return res.status(400).json({ error: 'Missing campaignId' });
+
+    // Verify campaign ownership and fetch
+    const { data: campaign, error: campErr } = await supabase
+      .from('campaigns')
+      .select('*')
+      .eq('id', campaignId)
+      .eq('user_id', tokenPayload.id)
+      .single();
+
+    if (campErr || !campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+    // Fetch associated emails
+    const { data: emails, error: emailErr } = await supabase
+      .from('emails')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('scheduled_at', { ascending: true });
+
+    if (emailErr) throw emailErr;
+
+    // Fetch user refresh token
+    const { data: user, error: userErr } = await supabase
+      .from('users')
+      .select('refresh_token')
+      .eq('id', tokenPayload.id)
+      .single();
+
+    if (userErr || !user || !user.refresh_token) {
+      return res.status(400).json({ error: 'OAuth credentials not found. Please log in again.' });
+    }
+
+    // Connect to Google Sheets API
+    const oAuth2Client = getOAuthClient(req);
+    oAuth2Client.setCredentials({ refresh_token: user.refresh_token });
+    const sheets = google.sheets({ version: 'v4', auth: oAuth2Client });
+
+    // Create Spreadsheet
+    const dateStr = new Date(campaign.created_at).toLocaleDateString();
+    const spreadsheet = await sheets.spreadsheets.create({
+      resource: {
+        properties: {
+          title: `Stroke Backup: ${campaign.subject_template || 'Campaign'} (${dateStr})`
+        }
+      }
+    });
+
+    const spreadsheetId = spreadsheet.data.spreadsheetId;
+    const spreadsheetUrl = spreadsheet.data.spreadsheetUrl;
+
+    // Build data rows
+    const headerRow = ['To Email', 'Subject', 'Status', 'Is Followup', 'Scheduled At', 'Sent At', 'Thread ID', 'Error Logs'];
+    const emailRows = (emails || []).map(e => [
+      e.to_email || '',
+      e.subject || '',
+      e.status || '',
+      e.is_followup ? 'Yes' : 'No',
+      e.scheduled_at ? new Date(e.scheduled_at).toLocaleString() : '',
+      e.sent_at ? new Date(e.sent_at).toLocaleString() : '',
+      e.thread_id || '',
+      e.error || ''
+    ]);
+
+    const values = [
+      ['STROKE CRM CAMPAIGN BACKUP SUMMARY'],
+      ['Campaign ID', campaign.id],
+      ['Subject Template', campaign.subject_template || 'N/A'],
+      ['Created At', new Date(campaign.created_at).toLocaleString()],
+      [],
+      ['RECIPIENT SEND LOGS'],
+      headerRow,
+      ...emailRows
+    ];
+
+    // Append to sheet
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: 'Sheet1!A1',
+      valueInputOption: 'RAW',
+      resource: { values }
+    });
+
+    res.status(200).json({ success: true, url: spreadsheetUrl, id: spreadsheetId });
+
+  } catch (err) {
+    console.error('Google Sheet backup error:', err);
+    res.status(500).json({ error: 'Failed to create Google Sheet backup', details: err.message });
   }
 });
 

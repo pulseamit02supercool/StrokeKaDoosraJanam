@@ -899,7 +899,8 @@ document.addEventListener('DOMContentLoaded', () => {
        const type = actionMap[c.action] || c.action;
        
        let manageBtn = `<div style="display:flex; gap:10px; align-items:center;">
-          <a href="${STROKE_API_BASE}/api/campaigns/export?campaignId=${c.id}" target="_blank" class="btn btn-ghost btn-sm" title="Download Send Log (includes threadId)">⬇ CSV</a>`;
+          <a href="${STROKE_API_BASE}/api/campaigns/export?campaignId=${c.id}" target="_blank" class="btn btn-ghost btn-sm" title="Download Send Log (includes threadId)">⬇ CSV</a>
+          <button class="btn btn-ghost btn-sm" onclick="window.backupToGoogleSheets('${c.id}', this)" title="Backup to Google Sheets">☁️ Backup</button>`;
           
        if (c.status !== 'cancelled' && (c.pending > 0)) {
           manageBtn += `<button class="btn btn-ghost btn-sm" onclick="window.openEditCampaign('${c.id}')">Edit</button></div>`;
@@ -1096,6 +1097,42 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error(err);
       alert('Error updating status: ' + err.message);
       controlsDiv.innerHTML = originalHtml;
+    }
+  };
+
+  window.backupToGoogleSheets = async (campaignId, buttonEl) => {
+    const originalHtml = buttonEl.innerHTML;
+    buttonEl.disabled = true;
+    buttonEl.innerHTML = `⏳ Backing up...`;
+
+    try {
+      const res = await apiFetch('/api/campaigns/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create sheet');
+
+      buttonEl.innerHTML = `🟢 Sheet Created!`;
+      buttonEl.classList.remove('btn-ghost');
+      buttonEl.classList.add('btn-primary');
+      
+      window.open(data.url, '_blank');
+      
+      setTimeout(() => {
+        buttonEl.innerHTML = originalHtml;
+        buttonEl.classList.add('btn-ghost');
+        buttonEl.classList.remove('btn-primary');
+        buttonEl.disabled = false;
+      }, 5000);
+
+    } catch (err) {
+      console.error(err);
+      alert('Error backing up to Google Sheets: ' + err.message + '\n\nMake sure to sign out and log back in to authorize the Google Sheets permissions!');
+      buttonEl.innerHTML = originalHtml;
+      buttonEl.disabled = false;
     }
   };
 
