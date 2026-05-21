@@ -255,8 +255,10 @@ router.get('/list', async (req, res) => {
         total_emails: campEmails.length,
         sent: campEmails.filter(e => e.status === 'sent').length,
         pending: campEmails.filter(e => e.status === 'pending' || e.status === 'processing').length,
+        paused: campEmails.filter(e => e.status === 'paused').length,
         failed: campEmails.filter(e => e.status === 'failed').length,
-        skipped: campEmails.filter(e => e.status === 'skipped_replied').length
+        skipped: campEmails.filter(e => e.status === 'skipped_replied').length,
+        cancelled: campEmails.filter(e => e.status === 'cancelled').length
       };
     });
 
@@ -564,6 +566,117 @@ router.get('/export', async (req, res) => {
   } catch (err) {
     console.error('Export campaign error:', err);
     res.status(500).json({ error: 'Failed to export campaign' });
+  }
+});
+
+// ── GET /api/campaigns/emails ──
+router.get('/emails', async (req, res) => {
+  try {
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
+
+    const campaignId = req.query.campaignId;
+    if (!campaignId) return res.status(400).json({ error: 'Missing campaignId' });
+
+    // Verify campaign belongs to the user
+    const { data: campaign, error: campErr } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('id', campaignId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (campErr || !campaign) {
+      return res.status(404).json({ error: 'Campaign not found or unauthorized' });
+    }
+
+    // Fetch individual emails
+    const { data: emails, error: emailsErr } = await supabase
+      .from('emails')
+      .select('id, to_email, subject, status, scheduled_at, sent_at, is_followup, error')
+      .eq('campaign_id', campaignId)
+      .order('scheduled_at', { ascending: true });
+
+    if (emailsErr) throw emailsErr;
+
+    res.status(200).json(emails || []);
+  } catch (err) {
+    console.error('Fetch campaign emails error:', err);
+    res.status(500).json({ error: 'Failed to fetch campaign emails' });
+  }
+});
+
+// ── POST /api/campaigns/emails/update-status ──
+router.post('/emails/update-status', async (req, res) => {
+  try {
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
+
+    const { emailId, status } = req.body;
+    if (!emailId || !status) return res.status(400).json({ error: 'Missing emailId or status' });
+
+    const allowedStatuses = ['pending', 'paused', 'cancelled'];
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be pending, paused, or cancelled.' });
+    }
+
+    // Fetch the email first to get the campaign_id
+    const { data: email, error: emailErr } = await supabase
+      .from('emails')
+      .select('id, campaign_id, status')
+      .eq('id', emailId)
+      .single();
+
+    if (emailErr || !email) {
+      return res.status(404).json({ error: 'Email not found' });
+    }
+
+    // Verify campaign belongs to the user
+    const { data: campaign, error: campErr } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('id', email.campaign_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (campErr || !campaign) {
+      return res.status(403).json({ error: 'Unauthorized access to this email' });
+    }
+
+    // Perform status update
+    const { data: updatedEmail, error: updateErr } = await supabase
+      .from('emails')
+      .update({ status })
+      .eq('id', emailId)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    res.status(200).json({ success: true, email: updatedEmail });
+  } catch (err) {
+    console.error('Update email status error:', err);
+    res.status(500).json({ error: 'Failed to update email status' });
   }
 });
 

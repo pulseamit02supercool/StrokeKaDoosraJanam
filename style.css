@@ -523,13 +523,84 @@ textarea { resize: vertical; }
 .table-wrap th { font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; font-size: .72rem; }
 .table-wrap td { color: var(--text); }
 
-.status-sent       { color: var(--success); font-weight: 600; }
+..status-sent       { color: var(--success); font-weight: 600; }
 .status-error       { color: var(--danger); font-weight: 600; }
 .status-skipped     { color: var(--warn); font-weight: 600; }
+.status-skipped_replied { color: var(--warn); font-weight: 600; }
 .status-followed_up { color: var(--success); font-weight: 600; }
 .status-completed   { color: var(--success); font-weight: 600; }
 .status-pending     { color: var(--warn); font-weight: 600; }
-.status-cancelled   { color: var(--danger); font-weight: 600; }
+.status-paused      { color: #f59e0b; font-weight: 600; } /* Amber */
+.status-cancelled   { color: var(--text-dim); font-weight: 600; text-decoration: line-through; }
+
+/* ── Recipient List Controls in Edit Modal ── */
+.edit-recip-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), border-color var(--transition);
+}
+.edit-recip-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.edit-recip-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.edit-recip-email {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.edit-recip-meta {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+.edit-recip-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.btn-control {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--surface-border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-control:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.btn-control-pause:hover:not(:disabled) {
+  border-color: #f59e0b;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+.btn-control-resume:hover:not(:disabled) {
+  border-color: var(--success);
+  color: var(--success);
+  background: rgba(16, 185, 129, 0.1);
+}
+.btn-control-cancel:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+.btn-control:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
 /* ── Follow-up planner (streak-like CRM block) ── */
 .followup-config {

@@ -102,6 +102,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const editCampFollowupsList = $('edit-camp-followups-list');
   let currentEditFollowups = [];
 
+  const editCampRecipientsContainer = $('edit-camp-recipients-container');
+  const editCampRecipientsSearch = $('edit-camp-recipients-search');
+  const editCampRecipientsList = $('edit-camp-recipients-list');
+  let currentEditEmails = [];
+
   /* ── Auth State & Cookie Parsing ── */
   let userSignatures = [];
   let csvRaw = null;
@@ -960,10 +965,143 @@ document.addEventListener('DOMContentLoaded', () => {
       editCampFollowupsList.innerHTML = '';
     }
 
+    // Fetch individual recipients
+    if (editCampRecipientsList) {
+      editCampRecipientsList.innerHTML = `<div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">Loading recipients...</div>`;
+      editCampRecipientsSearch.value = '';
+      currentEditEmails = [];
+      
+      apiFetch(`/api/campaigns/emails?campaignId=${c.id}`)
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch recipients');
+          return res.json();
+        })
+        .then(emails => {
+          currentEditEmails = emails;
+          renderEditCampaignRecipients(emails);
+        })
+        .catch(err => {
+          console.error(err);
+          editCampRecipientsList.innerHTML = `<div style="text-align:center; color:var(--danger); padding:1rem; font-size:0.9rem;">Failed to load recipients</div>`;
+        });
+    }
+
     btnCancelCampaign.style.display = 'inline-block';
     btnSaveCampaign.disabled = false;
     editCampModal.style.display = 'block';
   };
+
+  function renderEditCampaignRecipients(emails, filterText = '') {
+    if (!editCampRecipientsList) return;
+    
+    const query = filterText.toLowerCase().trim();
+    const filtered = emails.filter(e => e.to_email.toLowerCase().includes(query));
+    
+    if (filtered.length === 0) {
+      editCampRecipientsList.innerHTML = `<div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">No matching recipients found.</div>`;
+      return;
+    }
+    
+    editCampRecipientsList.innerHTML = filtered.map(email => {
+      const isPending = email.status === 'pending';
+      const isPaused = email.status === 'paused';
+      const isCancelled = email.status === 'cancelled';
+      
+      let controlsHtml = '';
+      if (isPending) {
+        controlsHtml = `
+          <button class="btn-control btn-control-pause" onclick="window.updateEmailStatus('${email.id}', 'paused')">Pause ⏸</button>
+          <button class="btn-control btn-control-cancel" onclick="window.updateEmailStatus('${email.id}', 'cancelled')">Cancel ✕</button>
+        `;
+      } else if (isPaused) {
+        controlsHtml = `
+          <button class="btn-control btn-control-resume" onclick="window.updateEmailStatus('${email.id}', 'pending')">Resume ▶</button>
+          <button class="btn-control btn-control-cancel" onclick="window.updateEmailStatus('${email.id}', 'cancelled')">Cancel ✕</button>
+        `;
+      } else if (isCancelled) {
+        controlsHtml = `<span style="font-size:0.75rem; color:var(--text-dim);">Cancelled</span>`;
+      } else {
+        let statusLabel = email.status;
+        if (email.status === 'skipped_replied') statusLabel = 'Replied (Skipped)';
+        if (email.status === 'sent') statusLabel = 'Sent ✓';
+        if (email.status === 'failed') statusLabel = 'Failed ✕';
+        controlsHtml = `<span style="font-size:0.75rem; color:var(--text-muted);">${statusLabel}</span>`;
+      }
+
+      let metaText = '';
+      if (email.status === 'pending' || email.status === 'paused') {
+        const dateStr = email.scheduled_at ? new Date(email.scheduled_at).toLocaleString() : 'N/A';
+        metaText = `Scheduled: ${dateStr}`;
+      } else if (email.status === 'sent') {
+        const dateStr = email.sent_at ? new Date(email.sent_at).toLocaleString() : 'N/A';
+        metaText = `Sent: ${dateStr}`;
+      } else if (email.status === 'failed') {
+        metaText = `Error: ${email.error || 'Unknown error'}`;
+      } else if (email.status === 'skipped_replied') {
+        metaText = `Replied - skipped further follow-ups`;
+      } else if (email.status === 'cancelled') {
+        metaText = `Cancelled outreach`;
+      }
+      
+      const stepBadge = email.is_followup ? `<span style="font-size:0.7rem; background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px; margin-right:4px;">Follow-up</span>` : `<span style="font-size:0.7rem; background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:3px; margin-right:4px;">Initial</span>`;
+
+      return `
+        <div class="edit-recip-item">
+          <div class="edit-recip-info">
+            <div class="edit-recip-email">${email.to_email}</div>
+            <div class="edit-recip-meta">
+              ${stepBadge}
+              <span>${metaText}</span>
+            </div>
+          </div>
+          <div class="edit-recip-controls" id="controls-${email.id}">
+            <span class="status-${email.status}" style="margin-right:8px; font-size:0.8rem;">${email.status.toUpperCase()}</span>
+            ${controlsHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  window.updateEmailStatus = async (emailId, status) => {
+    const controlsDiv = document.getElementById(`controls-${emailId}`);
+    if (!controlsDiv) return;
+
+    const originalHtml = controlsDiv.innerHTML;
+    controlsDiv.innerHTML = `<span style="font-size:0.8rem; color:var(--text-muted);">Updating...</span>`;
+
+    try {
+      const res = await apiFetch('/api/campaigns/emails/update-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailId, status })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to update status');
+      }
+
+      const idx = currentEditEmails.findIndex(e => e.id === emailId);
+      if (idx !== -1) {
+        currentEditEmails[idx].status = status;
+      }
+
+      const searchVal = editCampRecipientsSearch ? editCampRecipientsSearch.value : '';
+      renderEditCampaignRecipients(currentEditEmails, searchVal);
+
+      fetchCampaigns();
+
+    } catch (err) {
+      console.error(err);
+      alert('Error updating status: ' + err.message);
+      controlsDiv.innerHTML = originalHtml;
+    }
+  };
+
+  editCampRecipientsSearch?.addEventListener('input', (e) => {
+    renderEditCampaignRecipients(currentEditEmails, e.target.value);
+  });
 
   btnCloseEditModal.addEventListener('click', () => { editCampModal.style.display = 'none'; });
 

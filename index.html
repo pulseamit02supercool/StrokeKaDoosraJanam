@@ -350,6 +350,17 @@
         <div id="edit-camp-followups-list" style="display:flex; flex-direction:column; gap:1.5rem;"></div>
       </div>
       
+      <!-- Individual Recipients (Pausing/Resuming/Cancelling) -->
+      <div id="edit-camp-recipients-container" style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px dashed var(--border-color);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+          <h4 style="margin:0;">Individual Recipient Outreaches</h4>
+          <input type="text" id="edit-camp-recipients-search" placeholder="🔍 Search email..." style="max-width:200px; padding:4px 8px; font-size:0.85rem; border:1px solid var(--border-color); border-radius:var(--radius-sm); background:rgba(255,255,255,0.05); color:var(--text-color);" />
+        </div>
+        <div id="edit-camp-recipients-list" style="display:flex; flex-direction:column; gap:0.75rem; max-height:220px; overflow-y:auto; padding-right:5px; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.5rem; background:rgba(0,0,0,0.2);">
+          <div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">Loading recipients...</div>
+        </div>
+      </div>
+      
       <div style="display:flex; justify-content:space-between; margin-top:1.5rem;">
         <button class="btn btn-ghost" id="btn-cancel-campaign" style="color:var(--danger)">Cancel Whole Campaign</button>
         <div style="display:flex; gap:10px;">
