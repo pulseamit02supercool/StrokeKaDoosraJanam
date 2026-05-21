@@ -85,19 +85,19 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(frontendDir, 'index.html'));
 });
 
-// ── Internal scheduled jobs (backup - runs even if Apps Script misses a tick) ──
-// Process email queue every minute
-cron.schedule('* * * * *', async () => {
-  console.log(`[${new Date().toISOString()}] Internal cron: processing email queue...`);
-  try {
-    const result = await processEmailQueue();
-    if (result.processed > 0) {
-      console.log(`[${new Date().toISOString()}] Processed ${result.processed} emails (${result.success} sent, ${result.failed} failed)`);
-    }
-  } catch (err) {
-    console.error('Internal cron error:', err.message);
-  }
-});
+// ── Internal scheduled jobs (Disabled to prevent concurrent execution with Apps Script) ──
+// We rely solely on the external Apps Script cron trigger to avoid overlapping executions and duplicate emails.
+// cron.schedule('* * * * *', async () => {
+//   console.log(`[${new Date().toISOString()}] Internal cron: processing email queue...`);
+//   try {
+//     const result = await processEmailQueue();
+//     if (result.processed > 0) {
+//       console.log(`[${new Date().toISOString()}] Processed ${result.processed} emails (${result.success} sent, ${result.failed} failed)`);
+//     }
+//   } catch (err) {
+//     console.error('Internal cron error:', err.message);
+//   }
+// });
 
 // Cleanup old records daily at 3:00 AM UTC
 cron.schedule('0 3 * * *', async () => {
@@ -114,5 +114,5 @@ app.listen(PORT, () => {
   console.log(`\n🚀 Stroke CRM server running on port ${PORT}`);
   console.log(`   Frontend: http://localhost:${PORT}`);
   console.log(`   API:      http://localhost:${PORT}/api`);
-  console.log(`   Cron:     Internal scheduler active (every 1 min)\n`);
+  console.log(`   Cron:     External Apps Script trigger active (Internal cleanup at 3 AM daily)\n`);
 });
