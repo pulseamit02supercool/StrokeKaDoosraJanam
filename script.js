@@ -74,6 +74,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultsThead  = $('results-thead');
   const resultsTbody  = $('results-tbody');
   
+  // Timezone Elements
+  const enableLocalTz       = $('enable-local-tz');
+  const tzColumnSelect      = $('tz-column-select');
+  const tzSettingsGroup     = $('tz-settings-group');
+  const tzLocalOptions      = $('tz-local-options');
+  const verifyTimezones     = $('verify-timezones');
+  const tzVerificationModal = $('tz-verification-modal');
+  const btnCloseTzModal     = $('btn-close-tz-modal');
+  const btnCancelTzVerification = $('btn-cancel-tz-verification');
+  const btnConfirmTzLaunch  = $('btn-confirm-tz-launch');
+  const tzVerificationTbody = $('tz-verification-tbody');
+  
   // Modal Elements
   const sigModal      = $('sig-modal');
   const sigList       = $('sig-list');
@@ -284,6 +296,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     detectedVars.style.display = 'flex';
     dropText.innerHTML = `<strong>${headers.length}</strong> columns · <strong>${rows.length}</strong> rows loaded`;
+    
+    // Populate location/timezone column dropdown
+    if (tzColumnSelect) {
+      tzColumnSelect.innerHTML = '<option value="">-- Select Location Column --</option>' +
+        headers.map(h => `<option value="${h}">${escapeHtml(h)}</option>`).join('');
+      // Auto-detect location/timezone columns prioritizing explicit timezone columns
+      const autoCol = headers.find(h => {
+        const clean = h.trim().toLowerCase();
+        return clean === 'timezone' || clean === 'tz' || clean === 'time zone' || clean === 'time_zone';
+      }) || headers.find(h => {
+        const clean = h.trim().toLowerCase();
+        return clean.includes('timezone') || clean.includes('tz') || clean.includes('zone');
+      }) || headers.find(h => {
+        const clean = h.trim().toLowerCase();
+        return clean.includes('location') || clean.includes('country') || clean.includes('city');
+      });
+      if (autoCol) {
+        tzColumnSelect.value = autoCol;
+      }
+    }
+    
     renderPreview();
   }
 
@@ -449,6 +482,39 @@ document.addEventListener('DOMContentLoaded', () => {
     document.execCommand(command, false, null);
   }
 
+  function resolveTimezoneName(locationOrTz) {
+    if (!locationOrTz) return 'Asia/Kolkata';
+    const clean = String(locationOrTz).trim();
+    if (!clean) return 'Asia/Kolkata';
+
+    // Try to match standard IANA names by checking if standard formatting passes
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: clean });
+      return clean;
+    } catch(e) {}
+
+    // Check for standard offsets like +05:30, -0400, etc.
+    const offsetMatch = clean.match(/^([+-])(\d{1,2}):?(\d{2})?$/);
+    if (offsetMatch) {
+      const sign = offsetMatch[1];
+      const hh = String(offsetMatch[2]).padStart(2, '0');
+      const mm = String(offsetMatch[3] || '00').padStart(2, '0');
+      return `UTC${sign}${hh}:${mm}`;
+    }
+
+    // Try decimal offset
+    const num = Number(clean);
+    if (!isNaN(num)) {
+      const sign = num >= 0 ? '+' : '-';
+      const absNum = Math.abs(num);
+      const hh = String(Math.floor(absNum)).padStart(2, '0');
+      const mm = String(Math.round((absNum % 1) * 60)).padStart(2, '0');
+      return `UTC${sign}${hh}:${mm}`;
+    }
+
+    return 'Google Maps API Resolution';
+  }
+
   /* ──────────────────────────────────
      Preview
      ────────────────────────────────── */
@@ -459,7 +525,42 @@ document.addEventListener('DOMContentLoaded', () => {
     const ccVal = replaceVars($('cc-emails')?.value || '', row);
     const body = replaceVars(buildEmailTemplateHtml(), row);
     
-    let html = `
+    let tzHeader = '';
+    const isSchedule = document.querySelector('input[name="sendTiming"]:checked')?.value === 'schedule';
+    if (isSchedule && enableLocalTz && enableLocalTz.checked) {
+      const colName = tzColumnSelect.value;
+      if (colName) {
+        const colIdx = headers.indexOf(colName);
+        if (colIdx !== -1) {
+          const rawLoc = row[colIdx] || '';
+          const resolvedTz = resolveTimezoneName(rawLoc);
+          const scheduleInput = scheduleTimeInput.value;
+          
+          let dateText = 'N/A';
+          if (scheduleInput) {
+            try {
+              // Get the target wall-clock time
+              const localDate = new Date(scheduleInput); // wall clock
+              dateText = localDate.toLocaleString('en-US', {
+                month: 'short', day: 'numeric', year: 'numeric',
+                hour: 'numeric', minute: 'numeric', hour12: true
+              }) + ` (in recipient timezone: ${resolvedTz})`;
+            } catch (err) {
+              dateText = 'Invalid Date';
+            }
+          }
+          
+          tzHeader = `
+            <div style="background:rgba(99, 102, 241, 0.1); border:1px solid rgba(99, 102, 241, 0.2); padding:10px 14px; border-radius:var(--radius-sm); margin-bottom:15px; font-size:0.85rem; color:var(--text-color);">
+              <strong>📅 Target Local Schedule:</strong> ${escapeHtml(dateText)}<br/>
+              <strong>📍 Detected Location:</strong> <code style="background:rgba(255,255,255,0.08); padding:2px 4px; border-radius:3px;">${escapeHtml(rawLoc || 'empty')}</code> &rarr; mapped to <strong>${escapeHtml(resolvedTz)}</strong>
+            </div>
+          `;
+        }
+      }
+    }
+
+    let html = tzHeader + `
       <div class="preview-subject">Subject: ${escapeHtml(subj)}</div>
       ${ccVal ? `<div class="preview-cc">Cc: ${escapeHtml(ccVal)}</div>` : ''}
       <div class="preview-body">${body || '<em style="opacity:.4">Body is empty</em>'}</div>
@@ -921,7 +1022,8 @@ document.addEventListener('DOMContentLoaded', () => {
   timingRadios.forEach(r => r.addEventListener('change', () => {
     if (r.value === 'schedule') {
       scheduleTimeInput.style.display = 'block';
-      if (scheduleTzHint) scheduleTzHint.style.display = 'block';
+      if (scheduleTzHint) scheduleTzHint.style.display = enableLocalTz && enableLocalTz.checked ? 'none' : 'block';
+      if (tzSettingsGroup) tzSettingsGroup.style.display = 'block';
       // Pre-populate with 1 hour from now in IST, rounded to next 5 min
       const defIST = new Date(nowIST().getTime() + 60 * 60 * 1000);
       defIST.setUTCMinutes(Math.ceil(defIST.getUTCMinutes() / 5) * 5, 0, 0);
@@ -931,12 +1033,44 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       scheduleTimeInput.style.display = 'none';
       if (scheduleTzHint) scheduleTzHint.style.display = 'none';
+      if (tzSettingsGroup) tzSettingsGroup.style.display = 'none';
     }
+    renderPreview();
   }));
+
+  // Toggle local timezone sub-options and preview recalculations
+  enableLocalTz?.addEventListener('change', () => {
+    const isChecked = enableLocalTz.checked;
+    if (tzLocalOptions) tzLocalOptions.style.display = isChecked ? 'flex' : 'none';
+    if (scheduleTzHint) scheduleTzHint.style.display = isChecked ? 'none' : 'block';
+    renderPreview();
+  });
+
+  tzColumnSelect?.addEventListener('change', () => {
+    renderPreview();
+  });
 
   /* ──────────────────────────────────
      Schedule Campaign via Backend
      ────────────────────────────────── */
+
+  // Close verification modal
+  btnCloseTzModal?.addEventListener('click', () => {
+    tzVerificationModal.style.display = 'none';
+  });
+
+  btnCancelTzVerification?.addEventListener('click', () => {
+    tzVerificationModal.style.display = 'none';
+  });
+
+  btnConfirmTzLaunch?.addEventListener('click', () => {
+    const verifiedMappings = {};
+    tzVerificationTbody.querySelectorAll('.tz-mapping-select').forEach(sel => {
+      const loc = sel.dataset.location;
+      verifiedMappings[loc] = sel.value;
+    });
+    launchCampaign(verifiedMappings);
+  });
 
   btnSend.addEventListener('click', async () => {
     if (!user) { alert('Please sign in with Google first.'); return; }
@@ -946,18 +1080,99 @@ document.addEventListener('DOMContentLoaded', () => {
     const isSchedule = document.querySelector('input[name="sendTiming"]:checked').value === 'schedule';
     const scheduleInput = isSchedule ? scheduleTimeInput.value : '';
 
-    // Validate scheduled time is in the future (IST-aware)
+    // Validate scheduled time
     if (scheduleInput) {
-      const scheduledDate = istInputToDate(scheduleInput);
-      const twoMinFromNow = new Date(Date.now() + 2 * 60 * 1000);
-      if (scheduledDate <= twoMinFromNow) {
-        alert('The scheduled time (IST) must be at least 2 minutes in the future.\n\nPlease pick a later date/time or use "Send Instantly".');
-        btnSend.disabled = false;
+      const scheduledDate = new Date(scheduleInput);
+      const now = new Date();
+      if (scheduledDate <= now) {
+        alert('The scheduled time must be in the future.\n\nPlease pick a later date/time or use "Send Instantly".');
         return;
       }
     }
 
-    const scheduledAt = scheduleInput ? istInputToUTC(scheduleInput) : new Date().toISOString();
+    // Check if recipient local timezone is enabled
+    if (isSchedule && enableLocalTz && enableLocalTz.checked) {
+      const colName = tzColumnSelect.value;
+      if (!colName) { alert('Please select a Location CSV Column.'); return; }
+      const colIdx = headers.indexOf(colName);
+      if (colIdx === -1) { alert('Selected location column is not found in the CSV.'); return; }
+      
+      const verifyEnabled = verifyTimezones && verifyTimezones.checked;
+      if (verifyEnabled) {
+        // Extract unique locations from CSV
+        const uniqueLocations = [...new Set(rows.map(row => (row[colIdx] || '').trim()))];
+        
+        // Render verification rows
+        tzVerificationTbody.innerHTML = uniqueLocations.map((loc, idx) => {
+          const resolvedTz = resolveTimezoneName(loc);
+          const tzOptions = [
+            'Asia/Kolkata', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'UTC',
+            'America/Los_Angeles', 'America/Chicago', 'Australia/Sydney', 'Asia/Singapore',
+            'Asia/Dubai', 'Europe/Paris', 'Europe/Berlin', 'America/Toronto',
+            'America/Denver', 'America/Phoenix', 'America/Anchorage', 'Pacific/Honolulu',
+            'Europe/Moscow', 'Asia/Hong_Kong', 'Asia/Seoul'
+          ];
+          
+          if (!tzOptions.includes(resolvedTz)) {
+            tzOptions.unshift(resolvedTz);
+          }
+          
+          const dropdownHtml = `
+            <div class="select-wrap" style="height:32px; min-width:200px;">
+              <select class="tz-mapping-select" data-location="${escapeHtml(loc)}" style="padding:4px 8px; font-size:0.85rem;">
+                ${tzOptions.map(tz => `<option value="${tz}" ${tz === resolvedTz ? 'selected' : ''}>${escapeHtml(tz)}</option>`).join('')}
+              </select>
+            </div>
+          `;
+          
+          return `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+              <td style="padding:10px; font-weight:500;">${escapeHtml(loc || '(empty/blank)')}</td>
+              <td style="padding:10px; color:var(--text-dim);"><span id="tz-badge-${idx}" style="background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:3px; font-size:0.8rem;">${escapeHtml(resolvedTz)}</span></td>
+              <td style="padding:10px;">${dropdownHtml}</td>
+            </tr>
+          `;
+        }).join('');
+        
+        // Setup change badges on mapping selects
+        tzVerificationTbody.querySelectorAll('.tz-mapping-select').forEach((sel, idx) => {
+          sel.addEventListener('change', () => {
+            const badge = document.getElementById(`tz-badge-${idx}`);
+            if (badge) badge.textContent = sel.value;
+          });
+        });
+        
+        // Open modal and wait for confirm click
+        tzVerificationModal.style.display = 'block';
+        return;
+      } else {
+        // Auto-map without manual verification
+        const autoMappings = {};
+        rows.forEach(row => {
+          const loc = (row[colIdx] || '').trim();
+          autoMappings[loc] = resolveTimezoneName(loc);
+        });
+        launchCampaign(autoMappings);
+      }
+    } else {
+      // Standard route (IST scheduled offset or immediate)
+      launchCampaign(null);
+    }
+  });
+
+  async function launchCampaign(verifiedMappings) {
+    if (tzVerificationModal) tzVerificationModal.style.display = 'none';
+
+    const action = actionSel.value;
+    const isSchedule = document.querySelector('input[name="sendTiming"]:checked').value === 'schedule';
+    const scheduleInput = isSchedule ? scheduleTimeInput.value : '';
+    
+    // In local timezone mode, scheduleInput is passed directly as a wall-clock local time!
+    // Otherwise, we parse it through istInputToUTC
+    const isLocalTz = isSchedule && enableLocalTz && enableLocalTz.checked;
+    const scheduledAt = scheduleInput 
+      ? (isLocalTz ? scheduleInput : istInputToUTC(scheduleInput)) 
+      : new Date().toISOString();
 
     btnSend.disabled = true;
     progressArea.style.display = 'block';
@@ -975,8 +1190,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ccTemplate: $('cc-emails')?.value || '',
         csvData: rows,
         headers: headers,
-        scheduledAt
+        scheduledAt,
+        timezoneMode: isLocalTz ? 'recipient' : 'global',
+        timezoneColumn: isLocalTz ? tzColumnSelect.value : null,
+        timezoneMappings: verifiedMappings || null
       };
+
       if (action === 'threadedFollowup') {
         const hasThreadId = headers.some(h => String(h).toLowerCase().includes('threadid'));
         if (!hasThreadId) throw new Error("For follow-ups, upload send log CSV that contains 'threadId'.");
@@ -1016,7 +1235,7 @@ document.addEventListener('DOMContentLoaded', () => {
       progressText.textContent = `✅ Success! ${data.count} emails queued/scheduled.`;
       
       const msg = scheduleInput 
-        ? `Campaign successfully scheduled for ${new Date(scheduleInput).toLocaleString()}.\n\nThe server will run automatically in the background — you can safely close this tab.` 
+        ? `Campaign successfully scheduled.\n\nThe server will run automatically in the background — you can safely close this tab.` 
         : 'Campaign added to the queue! Processing them immediately...';
         
       alert(msg);
@@ -1033,7 +1252,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       btnSend.disabled = false;
     }
-  });
+  }
 
   /* ──────────────────────────────────
      Helpers

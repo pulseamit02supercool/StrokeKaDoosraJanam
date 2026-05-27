@@ -1,6 +1,6 @@
 const { supabase } = require('../lib/supabase');
 const { refreshAccessToken, sendEmail, checkForReply } = require('../lib/gmail');
-const { getUTCFromIST } = require('../lib/timezone');
+const { getUTCFromTimezone } = require('../lib/timezone');
 
 /**
  * Process the email queue.
@@ -122,10 +122,19 @@ async function processEmailQueue() {
         successCount++;
 
         // If this initial email has follow-up data, auto-create follow-up email records
-        if (!email.is_followup && Array.isArray(email.followup_data) && email.followup_data.length > 0) {
+        const hasFollowupData = email.followup_data && (Array.isArray(email.followup_data) || (typeof email.followup_data === 'object' && Array.isArray(email.followup_data.steps)));
+        if (!email.is_followup && hasFollowupData) {
+          const steps = Array.isArray(email.followup_data) 
+            ? email.followup_data 
+            : (email.followup_data.steps || []);
+          const recipientTz = (typeof email.followup_data === 'object' && email.followup_data.timezone) 
+            ? email.followup_data.timezone 
+            : 'Asia/Kolkata';
+
           const followupsToInsert = [];
-          for (const step of email.followup_data) {
-            const sendAt = getUTCFromIST(step.dayOffset, step.time);
+          for (const step of steps) {
+            const stepTz = step.timezone || recipientTz;
+            const sendAt = await getUTCFromTimezone(step.dayOffset, step.time, stepTz);
 
             followupsToInsert.push({
               campaign_id: email.campaign_id,

@@ -1,6 +1,6 @@
 const { supabase } = require('../_lib/supabase');
 const jwt = require('jsonwebtoken');
-const { getUTCFromIST } = require('../_lib/timezone');
+const { getUTCFromTimezone, resolveTimezoneOffset } = require('../_lib/timezone');
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
     const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
     if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
 
-    const { action, subjectTemplate, bodyTemplate, ccTemplate, csvData, headers, scheduledAt, followupDelayHours, followups } = req.body;
+    const { action, subjectTemplate, bodyTemplate, ccTemplate, csvData, headers, scheduledAt, followupDelayHours, followups, timezoneMode, timezoneColumn, timezoneMappings } = req.body;
 
     // 2. Validate input
     if (!csvData || !Array.isArray(csvData) || csvData.length === 0) {
@@ -100,6 +100,8 @@ module.exports = async (req, res) => {
     const rfcIdx = headers.findIndex(h => String(h).toLowerCase().includes('rfcmessageid'));
     const now = new Date();
 
+    const locationColIdx = (timezoneMode === 'recipient' && timezoneColumn) ? headers.indexOf(timezoneColumn) : -1;
+
     for (const row of csvData) {
       const toEmail = (row[emailHeaderIdx] || '').trim().toLowerCase();
       if (!toEmail) continue;
@@ -107,6 +109,17 @@ module.exports = async (req, res) => {
       seenEmails.add(toEmail);
 
       const resolvedCc = ccTemplate ? resolveTemplate(ccTemplate, row).trim() : '';
+
+      // Extract raw location and resolve recipient timezone
+      const rawLocation = locationColIdx !== -1 ? (row[locationColIdx] || '').trim() : '';
+      let recipientTz = 'Asia/Kolkata'; // Fallback standard IST route
+      if (timezoneMode === 'recipient' && rawLocation) {
+        if (timezoneMappings && timezoneMappings[rawLocation]) {
+          recipientTz = timezoneMappings[rawLocation];
+        } else {
+          recipientTz = rawLocation;
+        }
+      }
 
       // Threaded follow-up mode: create multiple follow-ups with custom templates.
       if (action === 'threadedFollowup') {
@@ -139,9 +152,32 @@ module.exports = async (req, res) => {
 
           let sendAt;
           if (step.isImplicit) {
-            sendAt = scheduledAt ? new Date(scheduledAt) : new Date();
+            // Initial email in recipient local timezone
+            if (timezoneMode === 'recipient' && scheduledAt) {
+              const match = scheduledAt.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+              if (match) {
+                const y = Number(match[1]);
+                const m = Number(match[2]) - 1;
+                const d = Number(match[3]);
+                const hh = Number(match[4]);
+                const mm = Number(match[5]);
+                
+                const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
+                const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+                sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
+                
+                if (sendAt <= now) {
+                  sendAt = new Date(now.getTime() + 60 * 1000);
+                }
+              } else {
+                sendAt = new Date(scheduledAt);
+              }
+            } else {
+              sendAt = scheduledAt ? new Date(scheduledAt) : new Date();
+            }
           } else {
-            sendAt = getUTCFromIST(step.dayOffset, step.time);
+            // Follow-up step calculated dynamically in recipient local timezone
+            sendAt = await getUTCFromTimezone(step.dayOffset, step.time, recipientTz);
           }
 
           emailsToInsert.push({
@@ -171,9 +207,40 @@ module.exports = async (req, res) => {
         followupData = followups.map(step => ({
           dayOffset: Number(step.dayOffset || 0),
           time: step.time || '10:00',
+          timezone: recipientTz, // Store resolved timezone on each step
           body: normalizeBody(resolveTemplate(step.bodyTemplate || bodyTemplate || '', row))
         }));
       }
+
+      let sendAt;
+      if (timezoneMode === 'recipient' && scheduledAt) {
+        const match = scheduledAt.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+        if (match) {
+          const y = Number(match[1]);
+          const m = Number(match[2]) - 1;
+          const d = Number(match[3]);
+          const hh = Number(match[4]);
+          const mm = Number(match[5]);
+          
+          const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
+          const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+          sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
+          
+          if (sendAt <= now) {
+            sendAt = new Date(now.getTime() + 60 * 1000);
+          }
+        } else {
+          sendAt = new Date(scheduledAt);
+        }
+      } else {
+        sendAt = new Date(campaign.scheduled_at);
+      }
+
+      // Safe metadata wrapper to hold resolved timezone and steps array in existing JSON column
+      const finalFollowupData = {
+        timezone: recipientTz,
+        steps: followupData || []
+      };
 
       emailsToInsert.push({
         campaign_id: campaign.id,
@@ -182,10 +249,10 @@ module.exports = async (req, res) => {
         cc_email: resolvedCc || null,
         subject: resolvedSubject,
         body: resolvedBody,
-        scheduled_at: campaign.scheduled_at,
+        scheduled_at: sendAt.toISOString(),
         status: 'pending',
         is_followup: false,
-        followup_data: followupData
+        followup_data: finalFollowupData
       });
     }
 

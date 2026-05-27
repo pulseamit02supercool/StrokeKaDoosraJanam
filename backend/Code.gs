@@ -9,6 +9,12 @@
  */
 
 /* ──────────────────────────────────────────────
+   CONFIGURATION
+   ────────────────────────────────────────────── */
+// Set your Render backend / Vercel API URL here when shifting to a different server
+var BACKEND_API_URL = 'https://stroke-25mz.onrender.com';
+
+/* ──────────────────────────────────────────────
    Web App Entry Points
    ────────────────────────────────────────────── */
 
@@ -323,7 +329,7 @@ function hasRecipientReplied(threadId) {
 function triggerRenderCron() {
   try {
     // Pings your Render URL to process the queue
-    var response = UrlFetchApp.fetch("https://stroke-25mz.onrender.com/api/cron/process", {
+    var response = UrlFetchApp.fetch(BACKEND_API_URL + "/api/cron/process", {
       method: "get",
       muteHttpExceptions: true
     });

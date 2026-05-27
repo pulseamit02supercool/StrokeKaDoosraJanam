@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
 const { getOAuthClient } = require('../lib/gmail');
 const { supabase } = require('../lib/supabase');
-const { getUTCFromIST } = require('../lib/timezone');
+const { getUTCFromTimezone, resolveTimezoneOffset } = require('../lib/timezone');
 
 const router = express.Router();
 
@@ -25,7 +25,7 @@ router.post('/create', async (req, res) => {
     const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
     if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
 
-    const { action, subjectTemplate, bodyTemplate, ccTemplate, csvData, headers, scheduledAt, followupDelayHours, followups } = req.body;
+    const { action, subjectTemplate, bodyTemplate, ccTemplate, csvData, headers, scheduledAt, followupDelayHours, followups, timezoneMode, timezoneColumn, timezoneMappings } = req.body;
 
     // 2. Validate input
     if (!csvData || !Array.isArray(csvData) || csvData.length === 0) {
@@ -110,6 +110,8 @@ router.post('/create', async (req, res) => {
     const rfcIdx = headers.findIndex(h => String(h).toLowerCase().includes('rfcmessageid'));
     const now = new Date();
 
+    const locationColIdx = (timezoneMode === 'recipient' && timezoneColumn) ? headers.indexOf(timezoneColumn) : -1;
+
     for (const row of csvData) {
       const toEmail = (row[emailHeaderIdx] || '').trim().toLowerCase();
       if (!toEmail) continue;
@@ -117,6 +119,17 @@ router.post('/create', async (req, res) => {
       seenEmails.add(toEmail);
 
       const resolvedCc = ccTemplate ? resolveTemplate(ccTemplate, row).trim() : '';
+
+      // Extract raw location and resolve recipient timezone
+      const rawLocation = locationColIdx !== -1 ? (row[locationColIdx] || '').trim() : '';
+      let recipientTz = 'Asia/Kolkata'; // Fallback standard IST route
+      if (timezoneMode === 'recipient' && rawLocation) {
+        if (timezoneMappings && timezoneMappings[rawLocation]) {
+          recipientTz = timezoneMappings[rawLocation];
+        } else {
+          recipientTz = rawLocation;
+        }
+      }
 
       // Threaded follow-up mode: create multiple follow-ups with custom templates.
       if (action === 'threadedFollowup') {
@@ -134,7 +147,7 @@ router.post('/create', async (req, res) => {
 
         if (!threadId) continue;
 
-        const followupSteps = Array.isArray(followups) && followups.length ? followups : [{
+        const followupSteps = Array.isArray(followups) && followupSteps.length ? followups : [{
           dayOffset: 0,
           time: null,
           subjectTemplate: subjectTemplate || 'Follow up',
@@ -149,9 +162,32 @@ router.post('/create', async (req, res) => {
 
           let sendAt;
           if (step.isImplicit) {
-            sendAt = scheduledAt ? new Date(scheduledAt) : new Date();
+            // Initial email in recipient local timezone
+            if (timezoneMode === 'recipient' && scheduledAt) {
+              const match = scheduledAt.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+              if (match) {
+                const y = Number(match[1]);
+                const m = Number(match[2]) - 1;
+                const d = Number(match[3]);
+                const hh = Number(match[4]);
+                const mm = Number(match[5]);
+                
+                const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
+                const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+                sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
+                
+                if (sendAt <= now) {
+                  sendAt = new Date(now.getTime() + 60 * 1000);
+                }
+              } else {
+                sendAt = new Date(scheduledAt);
+              }
+            } else {
+              sendAt = scheduledAt ? new Date(scheduledAt) : new Date();
+            }
           } else {
-            sendAt = getUTCFromIST(step.dayOffset, step.time);
+            // Follow-up step calculated dynamically in recipient local timezone
+            sendAt = await getUTCFromTimezone(step.dayOffset, step.time, recipientTz);
           }
 
           emailsToInsert.push({
@@ -181,9 +217,40 @@ router.post('/create', async (req, res) => {
         followupData = followups.map(step => ({
           dayOffset: Number(step.dayOffset || 0),
           time: step.time || '10:00',
+          timezone: recipientTz, // Store resolved timezone on each step
           body: normalizeBody(resolveTemplate(step.bodyTemplate || bodyTemplate || '', row))
         }));
       }
+
+      let sendAt;
+      if (timezoneMode === 'recipient' && scheduledAt) {
+        const match = scheduledAt.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+        if (match) {
+          const y = Number(match[1]);
+          const m = Number(match[2]) - 1;
+          const d = Number(match[3]);
+          const hh = Number(match[4]);
+          const mm = Number(match[5]);
+          
+          const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
+          const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+          sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
+          
+          if (sendAt <= now) {
+            sendAt = new Date(now.getTime() + 60 * 1000);
+          }
+        } else {
+          sendAt = new Date(scheduledAt);
+        }
+      } else {
+        sendAt = new Date(campaign.scheduled_at);
+      }
+
+      // Safe metadata wrapper to hold resolved timezone and steps array in existing JSON column
+      const finalFollowupData = {
+        timezone: recipientTz,
+        steps: followupData || []
+      };
 
       emailsToInsert.push({
         campaign_id: campaign.id,
@@ -192,10 +259,10 @@ router.post('/create', async (req, res) => {
         cc_email: resolvedCc || null,
         subject: resolvedSubject,
         body: resolvedBody,
-        scheduled_at: campaign.scheduled_at,
+        scheduled_at: sendAt.toISOString(),
         status: 'pending',
         is_followup: false,
-        followup_data: followupData
+        followup_data: finalFollowupData
       });
     }
 
@@ -518,7 +585,7 @@ router.get('/export', async (req, res) => {
     // Fetch the campaign to make sure it belongs to the user
     const { data: campaign, error: campErr } = await supabase
       .from('campaigns')
-      .select('id, action')
+      .select('id, action, csv_data, headers')
       .eq('id', campaignId)
       .eq('user_id', user.id)
       .single();
@@ -534,12 +601,38 @@ router.get('/export', async (req, res) => {
 
     if (emailErr) throw emailErr;
 
+    // Find headers index
+    const headersArr = campaign.headers || [];
+    const emailHeaderIdx = headersArr.findIndex(h => h.toLowerCase().includes('email'));
+    const locationColIdx = headersArr.findIndex(h => {
+      const clean = h.trim().toLowerCase();
+      return clean.includes('location') || clean.includes('timezone') || clean.includes('tz') || clean.includes('country') || clean.includes('city');
+    });
+
+    const { resolveTimezoneOffset } = require('../lib/timezone');
+
     // Build CSV
-    const keys = ['toEmail', 'subject', 'status', 'scheduledAt', 'sentAt', 'threadId', 'rfcMessageId', 'isFollowup', 'error'];
+    const keys = ['toEmail', 'subject', 'status', 'scheduledAt', 'sentAt', 'threadId', 'rfcMessageId', 'isFollowup', 'resolvedTimezone', 'error'];
     
     const csvRows = [keys.join(',')]; // Header
     
     for (const email of emails) {
+      let resolvedTz = 'Asia/Kolkata (IST standard)';
+      if (campaign.csv_data && emailHeaderIdx !== -1) {
+        const matchingRow = campaign.csv_data.find(r => (r[emailHeaderIdx] || '').trim().toLowerCase() === email.to_email.trim().toLowerCase());
+        if (matchingRow && locationColIdx !== -1) {
+          const rawLoc = (matchingRow[locationColIdx] || '').trim();
+          if (rawLoc) {
+            const offsetMins = await resolveTimezoneOffset(rawLoc);
+            const sign = offsetMins >= 0 ? '+' : '-';
+            const abs = Math.abs(offsetMins);
+            const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+            const mm = String(abs % 60).padStart(2, '0');
+            resolvedTz = `${rawLoc} (UTC${sign}${hh}:${mm})`;
+          }
+        }
+      }
+
       const row = [
         email.to_email,
         email.subject,
@@ -549,6 +642,7 @@ router.get('/export', async (req, res) => {
         email.thread_id || '',
         email.rfc_message_id || '',
         email.is_followup ? 'Yes' : 'No',
+        resolvedTz,
         email.error || ''
       ];
       
