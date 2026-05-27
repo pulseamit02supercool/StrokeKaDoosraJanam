@@ -124,7 +124,7 @@ router.post('/create', async (req, res) => {
       const rawLocation = locationColIdx !== -1 ? (row[locationColIdx] || '').trim() : '';
       let recipientTz = 'Asia/Kolkata'; // Fallback standard IST route
       if (timezoneMode === 'recipient' && rawLocation) {
-        if (timezoneMappings && timezoneMappings[rawLocation]) {
+        if (timezoneMappings && timezoneMappings[rawLocation] && timezoneMappings[rawLocation] !== 'Google Maps API Resolution') {
           recipientTz = timezoneMappings[rawLocation];
         } else {
           recipientTz = rawLocation;
