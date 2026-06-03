@@ -74,6 +74,7 @@ module.exports = async (req, res) => {
 
     const resolveTemplate = (tpl, row) => {
       let out = tpl || '';
+      out = out.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1');
       headers.forEach((header, i) => {
         const val = row[i] || '';
         const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');

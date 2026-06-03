@@ -84,6 +84,7 @@ router.post('/create', async (req, res) => {
 
     const resolveTemplate = (tpl, row) => {
       let out = tpl || '';
+      out = out.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1');
       headers.forEach((header, i) => {
         const val = row[i] || '';
         const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');
@@ -387,6 +388,7 @@ router.post('/update', async (req, res) => {
     // Helper functions for re-templating
     const resolveTemplate = (tpl, row) => {
       let out = tpl || '';
+      out = out.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1');
       campaign.headers.forEach((header, i) => {
         const val = row[i] || '';
         const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');
@@ -864,9 +866,10 @@ router.post('/emails/update-content', async (req, res) => {
     }
 
     // Perform content update
+    const cleanBody = body ? body.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1') : body;
     const { data: updatedEmail, error: updateErr } = await supabase
       .from('emails')
-      .update({ subject, body })
+      .update({ subject, body: cleanBody })
       .eq('id', emailId)
       .select()
       .single();

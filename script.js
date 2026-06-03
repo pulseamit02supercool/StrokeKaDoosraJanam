@@ -1393,6 +1393,7 @@ document.addEventListener('DOMContentLoaded', () => {
       
       const resolveTemplate = (tpl) => {
         let out = tpl || '';
+        out = out.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1');
         previewHeaders.forEach((header, i) => {
           const val = previewRow[i] || '';
           const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');
@@ -1633,7 +1634,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSaveEmail.addEventListener('click', async () => {
       const emailId = editEmailId.value;
       const subject = editEmailSubject.value.trim();
-      const body = getEditorHtml(editEmailBody);
+      const rawBody = getEditorHtml(editEmailBody);
+      const body = rawBody ? rawBody.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1') : '';
       
       btnSaveEmail.disabled = true;
       const originalText = btnSaveEmail.textContent;

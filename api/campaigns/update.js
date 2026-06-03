@@ -46,6 +46,7 @@ module.exports = async (req, res) => {
     // Helper functions for re-templating
     const resolveTemplate = (tpl, row) => {
       let out = tpl || '';
+      out = out.replace(/<span[^>]*class=["']email-var["'][^>]*>(.*?)<\/span>/gi, '$1');
       campaign.headers.forEach((header, i) => {
         const val = row[i] || '';
         const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');
