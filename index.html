@@ -470,6 +470,46 @@
     </div>
   </div>
 
+  <!-- Edit Single Email Modal -->
+  <div id="edit-email-modal" class="modal" style="display:none; z-index: 1050;">
+    <div class="modal-content card glass" style="max-width:600px; margin: 10% auto; position:relative; padding:2rem;">
+      <button class="icon-btn" id="btn-close-edit-email-modal" style="position:absolute; top:1rem; right:1rem; font-size:1.5rem; width:30px; height:30px; line-height:0;">&times;</button>
+      <h3 style="margin-top:0;">Edit Scheduled Email</h3>
+      
+      <input type="hidden" id="edit-email-id" />
+      
+      <div class="field">
+        <label>Subject</label>
+        <input type="text" id="edit-email-subject" />
+      </div>
+      
+      <div class="field">
+        <label>Body</label>
+        <div class="rich-editor">
+          <div class="rich-toolbar" id="edit-email-toolbar">
+            <button class="icon-btn toolbar-btn" type="button" data-command="bold"><strong>B</strong></button>
+            <button class="icon-btn toolbar-btn" type="button" data-command="italic"><em>I</em></button>
+            <button class="icon-btn toolbar-btn" type="button" data-command="underline"><span style="text-decoration:underline;">U</span></button>
+            <button class="icon-btn toolbar-btn" type="button" data-command="createLink">Link</button>
+            <button class="icon-btn toolbar-btn" type="button" data-command="removeFormat">Clear</button>
+          </div>
+          <div
+            id="edit-email-body"
+            class="rich-input"
+            contenteditable="true"
+            role="textbox"
+            aria-multiline="true"
+            style="min-height: 150px;"
+          ></div>
+        </div>
+      </div>
+      
+      <div style="display:flex; justify-content:flex-end; margin-top:1.5rem;">
+        <button class="btn btn-primary" id="btn-save-email">Save Email</button>
+      </div>
+    </div>
+  </div>
+
   <script src="config.js"></script>
   <script src="script.js"></script>
 </body>

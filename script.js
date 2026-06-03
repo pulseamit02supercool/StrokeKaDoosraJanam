@@ -1346,7 +1346,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const bodyContent = step.bodyTemplate ? (/<\/?[a-z][\s\S]*>/i.test(step.bodyTemplate) ? step.bodyTemplate : markdownToHtml(step.bodyTemplate)) : '';
         return `
           <div class="edit-fu-item">
-            <div style="margin-bottom:5px;"><strong>Follow-up ${i+1}</strong> <small style="color:var(--text-dim)">(After ${step.dayOffset} days)</small></div>
+            <div style="margin-bottom:5px; display:flex; align-items:center; gap:10px;">
+               <strong>Follow-up ${i+1}</strong>
+               <label style="font-size:0.85rem;">After <input type="number" class="edit-fu-days" data-idx="${i}" min="0" max="30" value="${step.dayOffset ?? 1}" style="width:50px; padding:2px; font-size:0.85rem;" /> day(s)</label>
+               <label style="font-size:0.85rem;">At <input type="time" class="edit-fu-time" data-idx="${i}" value="${step.time || '10:00'}" style="padding:2px; font-size:0.85rem;" /></label>
+            </div>
             <div class="rich-editor">
               <div class="rich-toolbar edit-fu-toolbar" data-idx="${i}">
                 <button class="icon-btn toolbar-btn" type="button" data-command="bold"><strong>B</strong></button>
@@ -1421,6 +1425,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let controlsHtml = '';
       if (isPending) {
         controlsHtml = `
+          <button class="btn-control" onclick="window.editEmailContent('${email.id}')">Edit ✏️</button>
           <button class="btn-control btn-control-pause" onclick="window.updateEmailStatus('${email.id}', 'paused')">Pause ⏸</button>
           <button class="btn-control btn-control-cancel" onclick="window.updateEmailStatus('${email.id}', 'cancelled')">Cancel ✕</button>
         `;
@@ -1509,6 +1514,89 @@ document.addEventListener('DOMContentLoaded', () => {
       controlsDiv.innerHTML = originalHtml;
     }
   };
+
+  const editEmailModal = $('edit-email-modal');
+  const btnCloseEditEmailModal = $('btn-close-edit-email-modal');
+  const btnSaveEmail = $('btn-save-email');
+  const editEmailId = $('edit-email-id');
+  const editEmailSubject = $('edit-email-subject');
+  const editEmailBody = $('edit-email-body');
+  const editEmailToolbar = $('edit-email-toolbar');
+
+  window.editEmailContent = (emailId) => {
+    const email = currentEditEmails.find(e => e.id === emailId);
+    if (!email) return;
+    editEmailId.value = email.id;
+    editEmailSubject.value = email.subject || '';
+    editEmailBody.innerHTML = email.body ? (/<\/?[a-z][\s\S]*>/i.test(email.body) ? email.body : markdownToHtml(email.body)) : '';
+    editEmailModal.style.display = 'block';
+  };
+
+  if (btnCloseEditEmailModal) {
+    btnCloseEditEmailModal.addEventListener('click', () => { editEmailModal.style.display = 'none'; });
+  }
+
+  if (editEmailToolbar) {
+    editEmailToolbar.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-command]');
+      if (!button) return;
+      runRichCommand(editEmailBody, button.dataset.command);
+    });
+  }
+
+  if (editEmailBody) {
+    editEmailBody.addEventListener('paste', (event) => {
+      event.preventDefault();
+      const html = event.clipboardData?.getData('text/html');
+      const text = event.clipboardData?.getData('text/plain') || '';
+      const cleaned = cleanPasteHtml(html, text);
+      document.execCommand('insertHTML', false, cleaned);
+    });
+  }
+
+  if (btnSaveEmail) {
+    btnSaveEmail.addEventListener('click', async () => {
+      const emailId = editEmailId.value;
+      const subject = editEmailSubject.value.trim();
+      const body = getEditorHtml(editEmailBody);
+      
+      btnSaveEmail.disabled = true;
+      const originalText = btnSaveEmail.textContent;
+      btnSaveEmail.textContent = 'Saving...';
+      
+      try {
+        const res = await apiFetch('/api/campaigns/emails/update-content', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ emailId, subject, body })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to update email');
+        }
+
+        const idx = currentEditEmails.findIndex(e => e.id === emailId);
+        if (idx !== -1) {
+          currentEditEmails[idx].subject = subject;
+          currentEditEmails[idx].body = body;
+        }
+
+        editEmailModal.style.display = 'none';
+        
+        // Refresh the UI to reflect changes
+        const searchVal = editCampRecipientsSearch ? editCampRecipientsSearch.value : '';
+        renderEditCampaignRecipients(currentEditEmails, searchVal);
+
+      } catch (err) {
+        console.error(err);
+        alert('Error updating email: ' + err.message);
+      } finally {
+        btnSaveEmail.disabled = false;
+        btnSaveEmail.textContent = originalText;
+      }
+    });
+  }
 
   window.backupToGoogleSheets = async (campaignId, buttonEl) => {
     const originalHtml = buttonEl.innerHTML;
@@ -1612,8 +1700,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updatedFollowups = currentEditFollowups.map((step, i) => {
        const editor = editCampFollowupsList.querySelector(`.edit-fu-body[data-idx="${i}"]`);
+       const dayInput = editCampFollowupsList.querySelector(`.edit-fu-days[data-idx="${i}"]`);
+       const timeInput = editCampFollowupsList.querySelector(`.edit-fu-time[data-idx="${i}"]`);
        return {
           ...step,
+          dayOffset: dayInput ? Number(dayInput.value) : step.dayOffset,
+          time: timeInput ? timeInput.value : step.time,
           bodyTemplate: getEditorHtml(editor)
        };
     });

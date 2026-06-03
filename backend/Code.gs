@@ -11,8 +11,20 @@
 /* ──────────────────────────────────────────────
    CONFIGURATION
    ────────────────────────────────────────────── */
-// Set your Render backend / Vercel API URL here when shifting to a different server
-var BACKEND_API_URL = 'https://stroke-25mz.onrender.com';
+// Retrieve BACKEND_API_URL dynamically from Script Properties, falling back to a hardcoded URL.
+var BACKEND_API_URL = getBackendUrl();
+
+function getBackendUrl() {
+  try {
+    var url = PropertiesService.getScriptProperties().getProperty('BACKEND_API_URL');
+    if (url) {
+      return url.replace(/\/$/, ''); // Remove trailing slash
+    }
+  } catch (err) {
+    Logger.log("Error reading BACKEND_API_URL property: " + err.toString());
+  }
+  return 'https://stroke-25mz.onrender.com'; // Hardcoded fallback
+}
 
 /* ──────────────────────────────────────────────
    Web App Entry Points
@@ -323,18 +335,93 @@ function hasRecipientReplied(threadId) {
 }
 
 /* ──────────────────────────────────────────────
-   Feature 4 – Vercel Cron Trigger
+   Feature 4 – Vercel/Render Cron Trigger & Utilities
    ────────────────────────────────────────────── */
 
 function triggerRenderCron() {
   try {
-    // Pings your Render URL to process the queue
-    var response = UrlFetchApp.fetch(BACKEND_API_URL + "/api/cron/process", {
+    var backendUrl = getBackendUrl();
+    var headers = {};
+    
+    // Check if CRON_SECRET is set in script properties
+    var cronSecret = PropertiesService.getScriptProperties().getProperty('CRON_SECRET');
+    if (cronSecret) {
+      headers["Authorization"] = "Bearer " + cronSecret;
+    }
+    
+    Logger.log("Pinging backend cron: " + backendUrl + "/api/cron/process");
+    
+    var response = UrlFetchApp.fetch(backendUrl + "/api/cron/process", {
       method: "get",
+      headers: headers,
       muteHttpExceptions: true
     });
-    Logger.log("Render Ping Response: " + response.getContentText());
+    
+    var responseCode = response.getResponseCode();
+    var responseText = response.getContentText();
+    
+    Logger.log("Render Ping Response Code: " + responseCode);
+    Logger.log("Render Ping Response Body: " + responseText);
+    
+    if (responseCode !== 200) {
+      Logger.log("WARNING: Cron ping did not return HTTP 200. Got: " + responseCode);
+    }
   } catch (e) {
     Logger.log("Error pinging cron: " + e.toString());
   }
+}
+
+/**
+ * Sets up a time-driven trigger to run `triggerRenderCron` every minute.
+ * Run this function once from the Apps Script editor to initialize the cron job automatically.
+ */
+function setupCronTrigger() {
+  // Clear any existing triggers for triggerRenderCron first to prevent duplicates
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'triggerRenderCron') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  
+  // Create a new time-driven trigger running every 1 minute
+  ScriptApp.newTrigger('triggerRenderCron')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+    
+  Logger.log("✅ Successfully created time-driven trigger to run triggerRenderCron every minute.");
+}
+
+/**
+ * Diagnostic Helper: Checks current configurations, triggers, and runs a test ping.
+ * Run this in the Apps Script Editor to debug backend connectivity!
+ */
+function testBackendConnection() {
+  Logger.log("--- Starting Stroke Backend Cron Diagnostic ---");
+  
+  var backendUrl = getBackendUrl();
+  Logger.log("Configured BACKEND_API_URL: " + backendUrl);
+  
+  var cronSecret = PropertiesService.getScriptProperties().getProperty('CRON_SECRET');
+  Logger.log("CRON_SECRET is " + (cronSecret ? "SET (length: " + cronSecret.length + ")" : "NOT SET"));
+  
+  var triggers = ScriptApp.getProjectTriggers();
+  var triggerFound = false;
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'triggerRenderCron') {
+      triggerFound = true;
+      Logger.log("Found Active Trigger: triggerRenderCron (" + triggers[i].getTriggerSource() + ")");
+    }
+  }
+  if (!triggerFound) {
+    Logger.log("❌ WARNING: No time-driven trigger found for triggerRenderCron! The cron will NOT run automatically.");
+    Logger.log("👉 Please run the `setupCronTrigger` function once in this editor to set it up.");
+  } else {
+    Logger.log("✅ Trigger is active!");
+  }
+  
+  Logger.log("Testing ping to backend...");
+  triggerRenderCron();
+  Logger.log("--- Diagnostic Complete ---");
 }

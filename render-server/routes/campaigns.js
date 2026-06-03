@@ -776,6 +776,71 @@ router.post('/emails/update-status', async (req, res) => {
   }
 });
 
+// ── POST /api/campaigns/emails/update-content ──
+router.post('/emails/update-content', async (req, res) => {
+  try {
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+
+    const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
+
+    const { emailId, subject, body } = req.body;
+    if (!emailId || subject === undefined || body === undefined) {
+      return res.status(400).json({ error: 'Missing emailId, subject, or body' });
+    }
+
+    // Fetch the email first to get the campaign_id
+    const { data: email, error: emailErr } = await supabase
+      .from('emails')
+      .select('id, campaign_id, status')
+      .eq('id', emailId)
+      .single();
+
+    if (emailErr || !email) {
+      return res.status(404).json({ error: 'Email not found' });
+    }
+
+    if (email.status !== 'pending' && email.status !== 'paused') {
+      return res.status(400).json({ error: 'Cannot edit an email that is already sent or cancelled.' });
+    }
+
+    // Verify campaign belongs to the user
+    const { data: campaign, error: campErr } = await supabase
+      .from('campaigns')
+      .select('id')
+      .eq('id', email.campaign_id)
+      .eq('user_id', user.id)
+      .single();
+
+    if (campErr || !campaign) {
+      return res.status(403).json({ error: 'Unauthorized access to this email' });
+    }
+
+    // Perform content update
+    const { data: updatedEmail, error: updateErr } = await supabase
+      .from('emails')
+      .update({ subject, body })
+      .eq('id', emailId)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    res.status(200).json({ success: true, email: updatedEmail });
+  } catch (err) {
+    console.error('Update email content error:', err);
+    res.status(500).json({ error: 'Failed to update email content' });
+  }
+});
+
 // ── POST /api/campaigns/backup ──
 router.post('/backup', async (req, res) => {
   try {
