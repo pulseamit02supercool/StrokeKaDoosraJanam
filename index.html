@@ -372,58 +372,72 @@
 
   <!-- Edit Campaign Modal -->
   <div id="edit-campaign-modal" class="modal" style="display:none;">
-    <div class="modal-content card glass" style="max-width:800px; margin: 10% auto; position:relative; padding:2rem;">
+    <div class="modal-content card glass" style="max-width:1200px; margin: 5% auto; position:relative; padding:2rem;">
       <button class="icon-btn" id="btn-close-edit-modal" style="position:absolute; top:1rem; right:1rem; font-size:1.5rem; width:30px; height:30px; line-height:0;">&times;</button>
       <h3 style="margin-top:0;">Edit Campaign Templates</h3>
       
       <input type="hidden" id="edit-camp-id" />
       
-      <div class="field">
-        <label>New Subject Template</label>
-        <input type="text" id="edit-camp-subject" />
-      </div>
-      
-      <div class="field" id="edit-cc-group">
-        <label for="edit-camp-cc">CC Email Template</label>
-        <input type="text" id="edit-camp-cc" placeholder="team@company.com, {{manager_email}}" />
-        <span class="help-text">Separate multiple CC recipients with commas (e.g. <code>team@company.com, {{manager_email}}</code>).</span>
-      </div>
-      
-      <div class="field">
-        <label>New Body Template <small>(Variables like {{name}} will be re-processed)</small></label>
-        <div class="rich-editor">
-          <div class="rich-toolbar" id="edit-camp-toolbar">
-            <button class="icon-btn toolbar-btn" type="button" data-command="bold" title="Bold"><strong>B</strong></button>
-            <button class="icon-btn toolbar-btn" type="button" data-command="italic" title="Italic"><em>I</em></button>
-            <button class="icon-btn toolbar-btn" type="button" data-command="underline" title="Underline"><span style="text-decoration:underline;">U</span></button>
-            <button class="icon-btn toolbar-btn" type="button" data-command="createLink" title="Add hyperlink">Link</button>
-            <button class="icon-btn toolbar-btn" type="button" data-command="removeFormat" title="Clear formatting">Clear</button>
+      <div class="two-col" style="align-items: flex-start;">
+        <div class="col" style="max-height: 70vh; overflow-y: auto; padding-right: 15px;">
+          <div class="field">
+            <label>New Subject Template</label>
+            <input type="text" id="edit-camp-subject" />
           </div>
-          <div
-            id="edit-camp-body"
-            class="rich-input"
-            contenteditable="true"
-            role="textbox"
-            aria-multiline="true"
-            style="min-height: 150px;"
-            data-placeholder="Paste or type your new email here."
-          ></div>
+          
+          <div class="field" id="edit-cc-group">
+            <label for="edit-camp-cc">CC Email Template</label>
+            <input type="text" id="edit-camp-cc" placeholder="team@company.com, {{manager_email}}" />
+            <span class="help-text">Separate multiple CC recipients with commas.</span>
+          </div>
+          
+          <div class="field">
+            <label>New Body Template <small>(Variables like {{name}} will be re-processed)</small></label>
+            <div class="rich-editor">
+              <div class="rich-toolbar" id="edit-camp-toolbar">
+                <button class="icon-btn toolbar-btn" type="button" data-command="bold" title="Bold"><strong>B</strong></button>
+                <button class="icon-btn toolbar-btn" type="button" data-command="italic" title="Italic"><em>I</em></button>
+                <button class="icon-btn toolbar-btn" type="button" data-command="underline" title="Underline"><span style="text-decoration:underline;">U</span></button>
+                <button class="icon-btn toolbar-btn" type="button" data-command="createLink" title="Add hyperlink">Link</button>
+                <button class="icon-btn toolbar-btn" type="button" data-command="removeFormat" title="Clear formatting">Clear</button>
+              </div>
+              <div
+                id="edit-camp-body"
+                class="rich-input"
+                contenteditable="true"
+                role="textbox"
+                aria-multiline="true"
+                style="min-height: 150px;"
+                data-placeholder="Paste or type your new email here."
+              ></div>
+            </div>
+          </div>
+          
+          <div id="edit-camp-followups-container" style="display:none; margin-top:1.5rem; padding-top:1.5rem; border-top:1px dashed var(--border-color);">
+            <h4 style="margin-top:0;">Follow-ups</h4>
+            <div id="edit-camp-followups-list" style="display:flex; flex-direction:column; gap:1.5rem;"></div>
+          </div>
+          
+          <!-- Individual Recipients (Pausing/Resuming/Cancelling) -->
+          <div id="edit-camp-recipients-container" style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px dashed var(--border-color);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+              <h4 style="margin:0;">Individual Recipient Outreaches</h4>
+              <input type="text" id="edit-camp-recipients-search" placeholder="🔍 Search email..." style="max-width:200px; padding:4px 8px; font-size:0.85rem; border:1px solid var(--border-color); border-radius:var(--radius-sm); background:rgba(255,255,255,0.05); color:var(--text-color);" />
+            </div>
+            <div id="edit-camp-recipients-list" style="display:flex; flex-direction:column; gap:0.75rem; max-height:220px; overflow-y:auto; padding-right:5px; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.5rem; background:rgba(0,0,0,0.2);">
+              <div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">Loading recipients...</div>
+            </div>
+          </div>
         </div>
-      </div>
-      
-      <div id="edit-camp-followups-container" style="display:none; margin-top:1.5rem; padding-top:1.5rem; border-top:1px dashed var(--border-color);">
-        <h4 style="margin-top:0;">Follow-ups</h4>
-        <div id="edit-camp-followups-list" style="display:flex; flex-direction:column; gap:1.5rem;"></div>
-      </div>
-      
-      <!-- Individual Recipients (Pausing/Resuming/Cancelling) -->
-      <div id="edit-camp-recipients-container" style="margin-top:1.5rem; padding-top:1.5rem; border-top:1px dashed var(--border-color);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
-          <h4 style="margin:0;">Individual Recipient Outreaches</h4>
-          <input type="text" id="edit-camp-recipients-search" placeholder="🔍 Search email..." style="max-width:200px; padding:4px 8px; font-size:0.85rem; border:1px solid var(--border-color); border-radius:var(--radius-sm); background:rgba(255,255,255,0.05); color:var(--text-color);" />
-        </div>
-        <div id="edit-camp-recipients-list" style="display:flex; flex-direction:column; gap:0.75rem; max-height:220px; overflow-y:auto; padding-right:5px; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:0.5rem; background:rgba(0,0,0,0.2);">
-          <div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">Loading recipients...</div>
+
+        <!-- Right column for live preview -->
+        <div class="col preview-col" style="position: sticky; top: 0;">
+          <div class="preview-toolbar">
+            <h3>Live Preview</h3>
+          </div>
+          <div class="preview-pane" id="edit-camp-preview-pane" style="min-height: 300px; max-height: 70vh; overflow-y: auto;">
+            <p class="empty-state">Loading preview data...</p>
+          </div>
         </div>
       </div>
       

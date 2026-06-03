@@ -1380,7 +1380,82 @@ document.addEventListener('DOMContentLoaded', () => {
       editCampFollowupsList.innerHTML = '';
     }
 
-    // Fetch individual recipients
+    // Fetch individual recipients and preview data
+    const previewPane = $('edit-camp-preview-pane');
+    if (previewPane) previewPane.innerHTML = `<p class="empty-state">Loading preview data...</p>`;
+    
+    let previewHeaders = [];
+    let previewRow = [];
+    
+    // Define render function
+    const renderEditPreview = () => {
+      if (!previewPane || previewRow.length === 0) return;
+      
+      const resolveTemplate = (tpl) => {
+        let out = tpl || '';
+        previewHeaders.forEach((header, i) => {
+          const val = previewRow[i] || '';
+          const regex = new RegExp(`{{\\s*${header}\\s*}}`, 'gi');
+          out = out.replace(regex, val);
+        });
+        return out;
+      };
+
+      const subj = editCampSubject.value || '';
+      const ccStr = $('edit-camp-cc') ? $('edit-camp-cc').value : '';
+      const bodyHtml = getEditorHtml(editCampBody) || '';
+      
+      let html = `<div class="preview-card" style="margin-bottom:20px;">
+        <div class="preview-header">
+          <strong>Subject:</strong> ${escapeHtml(resolveTemplate(subj))}
+          ${ccStr ? `<br/><strong>CC:</strong> ${escapeHtml(resolveTemplate(ccStr))}` : ''}
+        </div>
+        <div class="preview-body">${resolveTemplate(bodyHtml)}</div>
+      </div>`;
+      
+      if (currentEditFollowups.length > 0) {
+        html += `<h4 style="margin-bottom:10px;">Follow-ups Preview</h4>`;
+        for (let i = 0; i < currentEditFollowups.length; i++) {
+           const fuEditor = editCampFollowupsList.querySelector(`.edit-fu-body[data-idx="${i}"]`);
+           if (!fuEditor) continue;
+           const fuBodyHtml = getEditorHtml(fuEditor) || '';
+           html += `<div class="preview-card" style="margin-bottom:15px; opacity:0.9;">
+             <div class="preview-header"><strong>Follow-up ${i+1}</strong></div>
+             <div class="preview-body">${resolveTemplate(fuBodyHtml)}</div>
+           </div>`;
+        }
+      }
+      previewPane.innerHTML = html;
+    };
+    
+    // Bind listeners
+    editCampSubject.addEventListener('input', renderEditPreview);
+    if ($('edit-camp-cc')) $('edit-camp-cc').addEventListener('input', renderEditPreview);
+    editCampBody.addEventListener('input', renderEditPreview);
+    editCampBody.addEventListener('keyup', renderEditPreview);
+    
+    // Fetch preview data
+    apiFetch(`/api/campaigns/preview?campaignId=${c.id}`)
+      .then(res => res.json())
+      .then(data => {
+         previewHeaders = data.headers || [];
+         previewRow = data.row || [];
+         if (previewRow.length === 0) {
+           if (previewPane) previewPane.innerHTML = `<p class="empty-state">No CSV data available for preview.</p>`;
+         } else {
+           renderEditPreview();
+           // Bind listeners to follow-up editors too
+           editCampFollowupsList.querySelectorAll('.edit-fu-body').forEach(ed => {
+             ed.addEventListener('input', renderEditPreview);
+             ed.addEventListener('keyup', renderEditPreview);
+           });
+         }
+      })
+      .catch(err => {
+         console.error('Preview error:', err);
+         if (previewPane) previewPane.innerHTML = `<p class="empty-state" style="color:var(--danger)">Failed to load preview data.</p>`;
+      });
+
     if (editCampRecipientsList) {
       editCampRecipientsList.innerHTML = `<div style="text-align:center; opacity:0.5; padding:1rem; font-size:0.9rem;">Loading recipients...</div>`;
       editCampRecipientsSearch.value = '';
