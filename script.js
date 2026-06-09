@@ -1082,11 +1082,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Validate scheduled time
     if (scheduleInput) {
+      const isLocalTz = enableLocalTz && enableLocalTz.checked;
       const scheduledDate = new Date(scheduleInput);
       const now = new Date();
-      if (scheduledDate <= now) {
-        alert('The scheduled time must be in the future.\n\nPlease pick a later date/time or use "Send Instantly".');
-        return;
+      if (isLocalTz) {
+        const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const scheduledDayDate = new Date(scheduledDate.getFullYear(), scheduledDate.getMonth(), scheduledDate.getDate());
+        if (scheduledDayDate < todayDate) {
+          alert('The scheduled date cannot be in the past.\n\nPlease pick today or a future date.');
+          return;
+        }
+      } else {
+        if (scheduledDate <= now) {
+          alert('The scheduled time must be in the future.\n\nPlease pick a later date/time or use "Send Instantly".');
+          return;
+        }
       }
     }
 

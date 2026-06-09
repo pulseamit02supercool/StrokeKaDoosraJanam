@@ -34,10 +34,27 @@ router.post('/create', async (req, res) => {
 
     // 2.a Validate scheduled time is not in the past
     if (scheduledAt) {
-      const schedDate = new Date(scheduledAt);
-      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
-      if (schedDate < twoMinAgo) {
-        return res.status(400).json({ error: 'Scheduled time is in the past. Please pick a future date/time.' });
+      if (timezoneMode === 'recipient') {
+        const dateMatch = scheduledAt.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (dateMatch) {
+          const y = Number(dateMatch[1]);
+          const m = Number(dateMatch[2]) - 1;
+          const d = Number(dateMatch[3]);
+          
+          const nowServer = new Date();
+          const todayServer = new Date(nowServer.getFullYear(), nowServer.getMonth(), nowServer.getDate());
+          const scheduledDay = new Date(y, m, d);
+          
+          if (scheduledDay < todayServer) {
+            return res.status(400).json({ error: 'Scheduled date cannot be in the past. Please pick today or a future date.' });
+          }
+        }
+      } else {
+        const schedDate = new Date(scheduledAt);
+        const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+        if (schedDate < twoMinAgo) {
+          return res.status(400).json({ error: 'Scheduled time is in the past. Please pick a future date/time.' });
+        }
       }
     }
 
