@@ -175,6 +175,15 @@ router.post('/create', async (req, res) => {
                 
                 const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
                 const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+                
+                if (hh === 11 && mm === 0) {
+                  const recipientNow = new Date(now.getTime() + offsetMinutes * 60000);
+                  const localSeconds = recipientNow.getUTCHours() * 3600 + recipientNow.getUTCMinutes() * 60 + recipientNow.getUTCSeconds();
+                  if (localSeconds > 11 * 3600) {
+                    wallClockUTC.setUTCDate(wallClockUTC.getUTCDate() + 1);
+                  }
+                }
+                
                 sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
                 
                 if (sendAt <= now) {
@@ -235,6 +244,15 @@ router.post('/create', async (req, res) => {
           
           const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
           const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
+          
+          if (hh === 11 && mm === 0) {
+            const recipientNow = new Date(now.getTime() + offsetMinutes * 60000);
+            const localSeconds = recipientNow.getUTCHours() * 3600 + recipientNow.getUTCMinutes() * 60 + recipientNow.getUTCSeconds();
+            if (localSeconds > 11 * 3600) {
+              wallClockUTC.setUTCDate(wallClockUTC.getUTCDate() + 1);
+            }
+          }
+          
           sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
           
           if (sendAt <= now) {
