@@ -669,22 +669,62 @@ router.get('/diagnostic', async (req, res) => {
     const dbUrl = process.env.SUPABASE_URL;
     const dbKeyLength = process.env.SUPABASE_KEY ? process.env.SUPABASE_KEY.length : 0;
     const jwtSecret = process.env.JWT_SECRET;
+
+    // Decode token if present
+    let loggedInUserId = null;
+    let strokeToken = '';
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      strokeToken = authHeader.split(' ')[1];
+    } else {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
+    if (strokeToken) {
+      try {
+        const decoded = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+        loggedInUserId = decoded ? decoded.id : null;
+      } catch (e) {
+        loggedInUserId = 'Error: ' + e.message;
+      }
+    }
     
     // Check connection to campaigns table
     const { data: campaigns, error: campErr } = await supabase
       .from('campaigns')
-      .select('id, created_at')
-      .limit(10);
+      .select('id, user_id, created_at')
+      .limit(50);
       
     const { data: emails, error: emailErr } = await supabase
       .from('emails')
-      .select('id, status, is_followup')
-      .limit(10);
+      .select('id, user_id, status, is_followup, followup_data')
+      .limit(100);
+
+    // Get unique user_ids from tables
+    const campaignsUserIds = campaigns ? [...new Set(campaigns.map(c => c.user_id))] : [];
+    const emailsUserIds = emails ? [...new Set(emails.map(e => e.user_id))] : [];
+
+    // Count repair candidates globally (unfiltered by user)
+    let globalCandidatesCount = 0;
+    if (emails) {
+      for (const email of emails) {
+        if (!email.is_followup && email.status === 'sent') {
+          const hasFollowupData = email.followup_data && (Array.isArray(email.followup_data) || (typeof email.followup_data === 'object' && Array.isArray(email.followup_data.steps)));
+          if (hasFollowupData) {
+            globalCandidatesCount++;
+          }
+        }
+      }
+    }
 
     res.status(200).json({
       supabase_url: dbUrl,
       supabase_key_length: dbKeyLength,
       jwt_secret_configured: !!jwtSecret,
+      logged_in_user_id: loggedInUserId,
+      campaigns_user_ids: campaignsUserIds,
+      emails_user_ids: emailsUserIds,
+      global_repair_candidates_count: globalCandidatesCount,
       campaigns_error: campErr ? campErr.message : null,
       campaigns_count: campaigns ? campaigns.length : 0,
       campaigns_sample: campaigns || [],
