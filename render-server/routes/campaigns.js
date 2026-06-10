@@ -816,11 +816,23 @@ router.get('/diagnostic', async (req, res) => {
       }
     }
 
+    // Map samples to avoid large bodies/HTML causing truncation
+    const miniEmailsSample = (emails || []).map(e => ({
+      id: e.id,
+      campaign_id: e.campaign_id,
+      user_id: e.user_id,
+      status: e.status,
+      is_followup: e.is_followup,
+      to_email: e.to_email,
+      sent_at: e.sent_at
+    }));
+
     res.status(200).json({
       supabase_url: dbUrl,
       supabase_key_length: dbKeyLength,
       jwt_secret_configured: !!jwtSecret,
       logged_in_user_id: loggedInUserId,
+      dipsik_emails: dipsikEmails || [],
       campaigns_user_ids: campaignsUserIds,
       emails_user_ids: emailsUserIds,
       global_repair_candidates_count: globalCandidatesCount,
@@ -832,8 +844,7 @@ router.get('/diagnostic', async (req, res) => {
       campaigns_sample: campaigns || [],
       emails_error: emailErr ? emailErr.message : null,
       emails_count: emails ? emails.length : 0,
-      emails_sample: emails || [],
-      dipsik_emails: dipsikEmails || []
+      emails_sample: miniEmailsSample
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
