@@ -165,7 +165,7 @@ router.post('/create', async (req, res) => {
 
         if (!threadId) continue;
 
-        const followupSteps = Array.isArray(followups) && followupSteps.length ? followups : [{
+        const followupSteps = Array.isArray(followups) && followups.length ? followups : [{
           dayOffset: 0,
           time: null,
           subjectTemplate: subjectTemplate || 'Follow up',
@@ -832,6 +832,7 @@ router.get('/diagnostic', async (req, res) => {
       supabase_key_length: dbKeyLength,
       jwt_secret_configured: !!jwtSecret,
       logged_in_user_id: loggedInUserId,
+      last_cron_run: global.lastCronRun || null,
       dipsik_emails: dipsikEmails || [],
       campaigns_user_ids: campaignsUserIds,
       emails_user_ids: emailsUserIds,

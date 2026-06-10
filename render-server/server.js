@@ -42,9 +42,19 @@ app.get('/api/cron/process', async (req, res) => {
 
   try {
     const result = await processEmailQueue();
+    global.lastCronRun = {
+      timestamp: new Date().toISOString(),
+      status: 'success',
+      result
+    };
     res.status(200).json(result);
   } catch (err) {
     console.error('Cron process error:', err);
+    global.lastCronRun = {
+      timestamp: new Date().toISOString(),
+      status: 'error',
+      error: err.message
+    };
     res.status(500).send('Cron processing failed');
   }
 });
