@@ -19,36 +19,22 @@ let databaseUpdates = [];
 
 const mockSupabase = {
   from: (table) => {
-    return {
-      select: (selectStr) => {
-        return {
-          eq: (field1, val1) => {
-            return {
-              eq: (field2, val2) => {
-                return {
-                  single: () => {
-                    if (table === 'campaigns' && val1 === 'campaign-123' && val2 === 'user-123') {
-                      return Promise.resolve({ data: campaignDb, error: null });
-                    }
-                    return Promise.resolve({ data: null, error: new Error('Not found') });
-                  }
-                };
-              },
-              single: () => {
-                if (table === 'campaigns' && val1 === 'campaign-123') {
-                  return Promise.resolve({ data: campaignDb, error: null });
-                }
-                return Promise.resolve({ data: null, error: new Error('Not found') });
-              }
-            };
-          },
-          eq: (field, val) => {
-            if (table === 'emails' && field === 'campaign_id' && val === 'campaign-123') {
-              return Promise.resolve({ data: emailsDb, error: null });
-            }
-            return Promise.resolve({ data: [], error: null });
+    let eqFilters = [];
+    const query = {
+      select: () => query,
+      eq: (field, val) => {
+        eqFilters.push({ field, val });
+        return query;
+      },
+      single: () => {
+        if (table === 'campaigns') {
+          const idVal = eqFilters.find(f => f.field === 'id')?.val;
+          const userVal = eqFilters.find(f => f.field === 'user_id')?.val;
+          if (idVal === 'campaign-123' && (!userVal || userVal === 'user-123')) {
+            return Promise.resolve({ data: campaignDb, error: null });
           }
-        };
+        }
+        return Promise.resolve({ data: null, error: new Error('Not found') });
       },
       update: (payload) => {
         return {
@@ -57,8 +43,18 @@ const mockSupabase = {
             return Promise.resolve({ data: [payload], error: null });
           }
         };
+      },
+      then: (resolve, reject) => {
+        if (table === 'emails') {
+          const campVal = eqFilters.find(f => f.field === 'campaign_id')?.val;
+          if (campVal === 'campaign-123') {
+            return resolve({ data: emailsDb, error: null });
+          }
+        }
+        return resolve({ data: [], error: null });
       }
     };
+    return query;
   }
 };
 
@@ -230,6 +226,15 @@ async function runTests() {
       scheduled_at: '2026-06-10T10:00:00.000Z',
       status: 'pending',
       sent_at: null
+    },
+    {
+      id: 'email-fup-2',
+      campaign_id: 'campaign-123',
+      to_email: 'user@example.com',
+      is_followup: true,
+      scheduled_at: '2026-06-11T10:00:00.000Z',
+      status: 'pending',
+      sent_at: null
     }
   ];
 
@@ -237,18 +242,14 @@ async function runTests() {
   updates = await runApiUpdate();
   let fupUpdate = updates.find(u => u.table === 'emails' && u.eqVal === 'email-fup-1');
   assert(fupUpdate !== undefined, 'Follow-up email update should be found');
-  // Europe/London:
-  // Parent sent at: 2026-06-09T10:05:00.000Z (June 9 is BST, UTC+1, local time: 11:05:00 BST).
-  // Followup dayOffset: 1 -> scheduled for June 10.
-  // Followup time: '09:00' -> scheduled for June 10, 09:00 BST.
-  // June 10, 09:00 BST is 08:00 UTC (2026-06-10T08:00:00.000Z).
-  assertEqual(fupUpdate.payload.scheduled_at, '2026-06-10T08:00:00.000Z', 'Followup scheduled_at should be June 10 at 08:00 UTC (09:00 BST)');
+  // Since June 10 08:00 UTC is less than 24h from June 9 10:05 UTC, it bumps to June 11 08:00 UTC due to min delay rule.
+  assertEqual(fupUpdate.payload.scheduled_at, '2026-06-11T08:00:00.000Z', 'Followup scheduled_at should be June 11 at 08:00 UTC (09:00 BST)');
 
   // Express router update:
   updates = await runExpressUpdate();
   fupUpdate = updates.find(u => u.table === 'emails' && u.eqVal === 'email-fup-1');
   assert(fupUpdate !== undefined, 'Express: Follow-up email update should be found');
-  assertEqual(fupUpdate.payload.scheduled_at, '2026-06-10T08:00:00.000Z', 'Express: Followup scheduled_at should be June 10 at 08:00 UTC (09:00 BST)');
+  assertEqual(fupUpdate.payload.scheduled_at, '2026-06-11T08:00:00.000Z', 'Express: Followup scheduled_at should be June 11 at 08:00 UTC (09:00 BST)');
 
   console.log('\nAll campaign update timezone and schedule tests passed successfully!');
 }

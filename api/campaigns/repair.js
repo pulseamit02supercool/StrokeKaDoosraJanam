@@ -6,8 +6,11 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   try {
-    const cookies = req.headers.cookie || '';
-    const strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    let strokeToken = req.cookies?.stroke_token;
+    if (!strokeToken) {
+      const cookies = req.headers.cookie || '';
+      strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+    }
     
     if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
     
