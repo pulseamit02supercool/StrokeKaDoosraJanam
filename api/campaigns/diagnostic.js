@@ -42,6 +42,11 @@ module.exports = async (req, res) => {
       .select('id, user_id, status, is_followup, followup_data, campaign_id, to_email, sent_at')
       .limit(100);
 
+    const { data: dipsikEmails } = await supabase
+      .from('emails')
+      .select('*')
+      .eq('to_email', 'dipsik@thoughtworks.com');
+
     // Get unique user_ids from tables
     const campaignsUserIds = campaigns ? [...new Set(campaigns.map(c => c.user_id))] : [];
     const emailsUserIds = emails ? [...new Set(emails.map(e => e.user_id))] : [];
@@ -165,7 +170,8 @@ module.exports = async (req, res) => {
       campaigns_sample: campaigns || [],
       emails_error: emailErr ? emailErr.message : null,
       emails_count: emails ? emails.length : 0,
-      emails_sample: emails || []
+      emails_sample: emails || [],
+      dipsik_emails: dipsikEmails || []
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
