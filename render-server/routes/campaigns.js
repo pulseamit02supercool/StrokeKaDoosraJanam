@@ -411,14 +411,15 @@ router.post('/update', async (req, res) => {
       return res.status(400).json({ error: 'Cannot edit this campaign. The original data might have been cleaned up.' });
     }
 
-    // 2. Fetch pending emails for this campaign
-    const { data: pendingEmails, error: emailsErr } = await supabase
+    // 2. Fetch all emails for this campaign to get parent sent_at dates
+    const { data: allEmails, error: emailsErr } = await supabase
       .from('emails')
-      .select('id, to_email, is_followup, scheduled_at, status')
-      .eq('campaign_id', campaignId)
-      .eq('status', 'pending');
+      .select('id, to_email, is_followup, scheduled_at, status, sent_at, followup_data')
+      .eq('campaign_id', campaignId);
 
     if (emailsErr) throw emailsErr;
+
+    const pendingEmails = allEmails.filter(e => e.status === 'pending');
 
     // Helper functions for re-templating
     const resolveTemplate = (tpl, row) => {
@@ -446,12 +447,15 @@ router.post('/update', async (req, res) => {
     const emailHeaderIdx = campaign.headers.findIndex(h => h.toLowerCase().includes('email'));
     const followupsArr = req.body.followups || [];
 
-    // Group pending emails by to_email to safely remap already-spawned follow-ups
+    // Group all emails by to_email to safely remap already-spawned follow-ups
     const emailsByUser = {};
-    for (const email of pendingEmails) {
+    for (const email of allEmails) {
        if (!emailsByUser[email.to_email]) emailsByUser[email.to_email] = { main: null, fup: [] };
-       if (!email.is_followup) emailsByUser[email.to_email].main = email;
-       else emailsByUser[email.to_email].fup.push(email);
+       if (!email.is_followup) {
+           emailsByUser[email.to_email].main = email;
+       } else if (email.status === 'pending') {
+           emailsByUser[email.to_email].fup.push(email);
+       }
     }
 
     // 3. Prepare updates for pending main emails
@@ -463,18 +467,27 @@ router.post('/update', async (req, res) => {
       const group = emailsByUser[to_email];
 
       // Update the main email (if it is still pending)
-      if (group.main) {
+      if (group.main && group.main.status === 'pending') {
          const resolvedSubject = resolveTemplate(subjectTemplate, row);
          const resolvedBody = normalizeBody(resolveTemplate(bodyTemplate, row));
          const resolvedCc = ccTemplate ? resolveTemplate(ccTemplate, row).trim() : '';
          
          let newFollowupData = null;
          if (followupsArr.length > 0) {
-            newFollowupData = followupsArr.map(step => ({
-              dayOffset: Number(step.dayOffset || 0),
-              time: step.time || '10:00',
-              body: normalizeBody(resolveTemplate(step.bodyTemplate || '', row))
-            }));
+            const oldFupData = group.main && group.main.followup_data;
+            const recipientTz = (oldFupData && typeof oldFupData === 'object' && !Array.isArray(oldFupData) && oldFupData.timezone)
+               ? oldFupData.timezone
+               : 'Asia/Kolkata';
+
+            newFollowupData = {
+               timezone: recipientTz,
+               steps: followupsArr.map(step => ({
+                 dayOffset: Number(step.dayOffset || 0),
+                 time: step.time || '10:00',
+                 timezone: recipientTz,
+                 body: normalizeBody(resolveTemplate(step.bodyTemplate || '', row))
+               }))
+            };
          }
          
          emailUpdates.push({
@@ -504,12 +517,25 @@ router.post('/update', async (req, res) => {
             const subTpl = tpl.subjectTemplate || subjectTemplate || 'Follow up';
             const resolvedSubject = resolveTemplate(subTpl, row);
             const resolvedCc = ccTemplate ? resolveTemplate(ccTemplate, row).trim() : '';
+            
+            // Recalculate scheduled_at using parent's sent_at (if parent was sent) or current time
+            let newScheduledAt = fuEmail.scheduled_at;
+            if (tpl.dayOffset !== undefined && tpl.time !== undefined) {
+               const baseDate = (group.main && group.main.sent_at) ? group.main.sent_at : null;
+               const oldFupData = group.main && group.main.followup_data;
+               const recipientTz = (oldFupData && typeof oldFupData === 'object' && !Array.isArray(oldFupData) && oldFupData.timezone)
+                  ? oldFupData.timezone
+                  : 'Asia/Kolkata';
+               const sendAt = await getUTCFromTimezone(tpl.dayOffset, tpl.time, recipientTz, baseDate);
+               newScheduledAt = sendAt.toISOString();
+            }
 
             emailUpdates.push({
                id: fuEmail.id,
                subject: resolvedSubject,
                body: resolvedBody,
-               cc_email: resolvedCc || null
+               cc_email: resolvedCc || null,
+               scheduled_at: newScheduledAt
             });
          }
       }
@@ -523,6 +549,9 @@ router.post('/update', async (req, res) => {
        }
        if (update.cc_email !== undefined) {
          emailUpdateObj.cc_email = update.cc_email;
+       }
+       if (update.scheduled_at !== undefined) {
+         emailUpdateObj.scheduled_at = update.scheduled_at;
        }
        await supabase.from('emails').update(emailUpdateObj).eq('id', update.id);
     }

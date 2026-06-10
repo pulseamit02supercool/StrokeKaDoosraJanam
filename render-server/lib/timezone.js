@@ -124,14 +124,15 @@ async function resolveTimezoneOffset(locationOrTz, referenceDate = new Date()) {
  * Converts a day offset, clock time, and timezone or location to a UTC Date object.
  * Now asynchronous to support Google Maps API fetches!
  */
-async function getUTCFromTimezone(dayOffset, timeStr, timezoneOrOffset) {
-  const now = new Date();
+async function getUTCFromTimezone(dayOffset, timeStr, timezoneOrOffset, baseDate = null) {
+  const reference = baseDate ? new Date(baseDate) : new Date();
+  const actualNow = new Date();
   
   // 1. Resolve target timezone offset in minutes at the current time
-  const offsetMinutes = await resolveTimezoneOffset(timezoneOrOffset, now);
+  const offsetMinutes = await resolveTimezoneOffset(timezoneOrOffset, actualNow);
   
-  // 2. Shift current absolute UTC time to target timezone's local representation
-  const targetNow = new Date(now.getTime() + offsetMinutes * 60000);
+  // 2. Shift reference absolute UTC time to target timezone's local representation
+  const targetNow = new Date(reference.getTime() + offsetMinutes * 60000);
   
   const daysToAdd = Number(dayOffset || 0);
   targetNow.setUTCDate(targetNow.getUTCDate() + daysToAdd);
@@ -151,7 +152,7 @@ async function getUTCFromTimezone(dayOffset, timeStr, timezoneOrOffset) {
   
   // 4.5. Enforce minimum delay if dayOffset specifies full days.
   if (daysToAdd > 0) {
-    const minRequiredTime = new Date(now.getTime() + (daysToAdd * 24 * 60 * 60 * 1000) - (5 * 60000));
+    const minRequiredTime = new Date(reference.getTime() + (daysToAdd * 24 * 60 * 60 * 1000) - (5 * 60000));
     if (absoluteUTC < minRequiredTime) {
       // It shrinks the delay below the required 24hr chunks, so bump to next calendar day.
       absoluteUTC.setUTCDate(absoluteUTC.getUTCDate() + 1);
@@ -159,8 +160,8 @@ async function getUTCFromTimezone(dayOffset, timeStr, timezoneOrOffset) {
   }
   
   // 5. Ensure the resulting time is strictly in the future
-  if (absoluteUTC <= now) {
-    absoluteUTC.setTime(now.getTime() + 60 * 1000);
+  if (absoluteUTC <= actualNow) {
+    absoluteUTC.setTime(actualNow.getTime() + 60 * 1000);
   }
   
   return absoluteUTC;

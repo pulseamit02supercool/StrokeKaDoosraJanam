@@ -96,11 +96,20 @@ module.exports = async (req, res) => {
          
          let newFollowupData = null;
          if (followupsArr.length > 0) {
-            newFollowupData = followupsArr.map(step => ({
-              dayOffset: Number(step.dayOffset || 0),
-              time: step.time || '10:00',
-              body: normalizeBody(resolveTemplate(step.bodyTemplate || '', row))
-            }));
+            const oldFupData = group.main && group.main.followup_data;
+            const recipientTz = (oldFupData && typeof oldFupData === 'object' && !Array.isArray(oldFupData) && oldFupData.timezone)
+               ? oldFupData.timezone
+               : 'Asia/Kolkata';
+
+            newFollowupData = {
+               timezone: recipientTz,
+               steps: followupsArr.map(step => ({
+                 dayOffset: Number(step.dayOffset || 0),
+                 time: step.time || '10:00',
+                 timezone: recipientTz,
+                 body: normalizeBody(resolveTemplate(step.bodyTemplate || '', row))
+               }))
+            };
          }
          
          emailUpdates.push({
@@ -135,7 +144,10 @@ module.exports = async (req, res) => {
             let newScheduledAt = fuEmail.scheduled_at;
             if (tpl.dayOffset !== undefined && tpl.time !== undefined) {
                const baseDate = (group.main && group.main.sent_at) ? group.main.sent_at : null;
-               const recipientTz = (group.main && group.main.followup_data && group.main.followup_data.timezone) ? group.main.followup_data.timezone : 'Asia/Kolkata';
+               const oldFupData = group.main && group.main.followup_data;
+               const recipientTz = (oldFupData && typeof oldFupData === 'object' && !Array.isArray(oldFupData) && oldFupData.timezone)
+                  ? oldFupData.timezone
+                  : 'Asia/Kolkata';
                const sendAt = await getUTCFromTimezone(tpl.dayOffset, tpl.time, recipientTz, baseDate);
                newScheduledAt = sendAt.toISOString();
             }
