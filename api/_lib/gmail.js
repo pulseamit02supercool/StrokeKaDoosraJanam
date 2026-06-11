@@ -97,7 +97,12 @@ async function sendEmail(accessToken, to, subject, bodyHtml, threadId = null, re
         const firstMsg = threadRes.data.messages[0];
         const subjectHeader = (firstMsg.payload.headers || []).find(h => h.name.toLowerCase() === 'subject');
         if (subjectHeader) {
-          finalSubject = subjectHeader.value;
+          const origSubject = subjectHeader.value;
+          if (!origSubject.toLowerCase().startsWith('re:')) {
+            finalSubject = `Re: ${origSubject}`;
+          } else {
+            finalSubject = origSubject;
+          }
         }
 
         // Always reply to the latest message in the thread
@@ -173,6 +178,9 @@ async function checkForReply(accessToken, threadId, senderEmail) {
       const xAutoResponseSuppress = (headers.find(h => h.name.toLowerCase() === 'x-auto-response-suppress')?.value || '').toLowerCase();
       const fromVal = (fromHeader?.value || '').toLowerCase();
       const senderVal = (senderEmail || '').toLowerCase();
+
+      // Ignore user's own sent messages (Gmail labels all sent mail with 'SENT')
+      if (msg.labelIds && msg.labelIds.includes('SENT')) continue;
 
       if (!fromVal || (senderVal && fromVal.includes(senderVal))) continue;
 

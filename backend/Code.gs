@@ -249,7 +249,12 @@ function handleThreadedFollowup(data) {
         var firstMsgHeaders = msgs[0].payload.headers || [];
         for (var h = 0; h < firstMsgHeaders.length; h++) {
           if (firstMsgHeaders[h].name.toLowerCase() === 'subject') {
-            finalSubject = firstMsgHeaders[h].value;
+            var origSubject = firstMsgHeaders[h].value;
+            if (!origSubject.toLowerCase().startsWith('re:')) {
+              finalSubject = 'Re: ' + origSubject;
+            } else {
+              finalSubject = origSubject;
+            }
             break;
           }
         }
@@ -265,7 +270,7 @@ function handleThreadedFollowup(data) {
         }
         // Append the latest Message-ID to the chain if not already present
         if (inReplyTo && references.indexOf(inReplyTo) === -1) {
-          references = references + ' ' + inReplyTo;
+          references = (references + ' ' + inReplyTo).trim();
         }
       }
     } catch (fetchErr) {
@@ -326,9 +331,21 @@ function hasRecipientReplied(threadId) {
     if (messages.length <= 1) return false;
 
     var myEmail = Session.getActiveUser().getEmail().toLowerCase();
+    var aliases = GmailApp.getAliases().map(function(email) { return email.toLowerCase(); });
+
     for (var i = 1; i < messages.length; i++) {
       var from = messages[i].getFrom().toLowerCase();
-      if (from.indexOf(myEmail) === -1) return true; // Someone else replied
+      var isFromMe = (from.indexOf(myEmail) !== -1);
+      if (!isFromMe) {
+        for (var j = 0; j < aliases.length; j++) {
+          if (from.indexOf(aliases[j]) !== -1) {
+            isFromMe = true;
+            break;
+          }
+        }
+      }
+      if (isFromMe) continue; // Sent by user or one of their aliases
+      return true; // Someone else replied
     }
   } catch (_) {}
   return false;
