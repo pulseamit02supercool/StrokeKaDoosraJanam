@@ -665,6 +665,42 @@ router.post('/repair', async (req, res) => {
   }
 });
 
+// ── POST /api/campaigns/recover-skipped ──
+router.post('/recover-skipped', async (req, res) => {
+  try {
+    let strokeToken = req.cookies?.stroke_token;
+    if (!strokeToken) {
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        strokeToken = authHeader.split(' ')[1];
+      } else {
+        const cookies = req.headers.cookie || '';
+        strokeToken = cookies.split('; ').find(row => row.startsWith('stroke_token='))?.split('=')[1];
+      }
+    }
+    
+    if (!strokeToken) return res.status(401).json({ error: 'Unauthorized' });
+    
+    const user = jwt.verify(strokeToken, process.env.JWT_SECRET || 'fallback-secret');
+    if (!user || !user.id) return res.status(401).json({ error: 'Invalid token' });
+
+    // Update status from 'skipped_replied' back to 'pending' for this user
+    const { data: updated, error } = await supabase
+      .from('emails')
+      .update({ status: 'pending', error: null })
+      .eq('user_id', user.id)
+      .eq('status', 'skipped_replied')
+      .select('id');
+
+    if (error) throw error;
+
+    res.status(200).json({ success: true, recoveredCount: updated ? updated.length : 0 });
+  } catch (err) {
+    console.error('Recover skipped emails error:', err);
+    res.status(500).json({ error: 'Failed to recover skipped emails', details: err.message });
+  }
+});
+
 // ── GET /api/campaigns/diagnostic ──
 router.get('/diagnostic', async (req, res) => {
   try {
