@@ -40,25 +40,43 @@ async function processEmailQueue() {
       return { processed: 0, message: 'All candidates claimed by another worker' };
     }
 
-    // 3. Re-fetch the full data for emails we successfully claimed
-    const { data: pendingEmails, error: fetchErr } = await supabase
-      .from('emails')
-      .select('*, campaigns(id, followup_delay_hours, action)')
-      .in('id', claimedIds);
+    // 3. Re-fetch the full data for emails we successfully claimed.
+    // If anything fails between the claim and the send loop, release the claim so the
+    // emails return to 'pending' instead of being stranded in 'processing' forever.
+    let pendingEmails, users;
+    try {
+      const { data, error: fetchErr } = await supabase
+        .from('emails')
+        .select('*, campaigns(id, followup_delay_hours, action)')
+        .in('id', claimedIds);
 
-    if (fetchErr) throw fetchErr;
+      if (fetchErr) throw fetchErr;
+      pendingEmails = data;
+
+      if (pendingEmails && pendingEmails.length > 0) {
+        // 4. Group by user_id to optimize token refreshes
+        const userIds = [...new Set(pendingEmails.map(e => e.user_id))];
+        const { data: userData, error: userErr } = await supabase
+          .from('users')
+          .select('id, refresh_token, email, name')
+          .in('id', userIds);
+
+        if (userErr) throw userErr;
+        users = userData;
+      }
+    } catch (preLoopErr) {
+      console.error('Pre-send query failed, releasing claimed emails back to pending:', preLoopErr.message);
+      await supabase
+        .from('emails')
+        .update({ status: 'pending' })
+        .in('id', claimedIds)
+        .eq('status', 'processing');
+      throw preLoopErr;
+    }
+
     if (!pendingEmails || pendingEmails.length === 0) {
       return { processed: 0, message: 'All candidates claimed by another worker' };
     }
-
-    // 4. Group by user_id to optimize token refreshes
-    const userIds = [...new Set(pendingEmails.map(e => e.user_id))];
-    const { data: users, error: userErr } = await supabase
-      .from('users')
-      .select('id, refresh_token, email, name')
-      .in('id', userIds);
-    
-    if (userErr) throw userErr;
 
     // Build a map of user ID -> access token
     const accessTokenMap = {};
@@ -199,4 +217,27 @@ async function markEmailFailed(id, errorMsg) {
   await supabase.from('emails').update({ status: 'failed', error: errorMsg }).eq('id', id);
 }
 
-module.exports = { processEmailQueue };
+/**
+ * Requeue emails stranded in 'processing'.
+ * Safe to run at server startup: this is a single-instance server, so no batch can be
+ * in flight while booting — any 'processing' row is an orphan from a crashed/restarted batch.
+ */
+async function recoverOrphanedProcessing() {
+  const { data, error } = await supabase
+    .from('emails')
+    .update({ status: 'pending' })
+    .eq('status', 'processing')
+    .select('id');
+
+  if (error) {
+    console.error('Failed to recover orphaned processing emails:', error.message);
+    return { recovered: 0, error: error.message };
+  }
+  const recovered = data ? data.length : 0;
+  if (recovered > 0) {
+    console.log(`Recovered ${recovered} emails stuck in 'processing' back to 'pending'`);
+  }
+  return { recovered };
+}
+
+module.exports = { processEmailQueue, recoverOrphanedProcessing };

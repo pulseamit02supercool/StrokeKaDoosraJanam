@@ -11,7 +11,7 @@
 const express = require('express');
 const path = require('path');
 const cron = require('node-cron');
-const { processEmailQueue } = require('./cron/process');
+const { processEmailQueue, recoverOrphanedProcessing } = require('./cron/process');
 const { runCleanup } = require('./cron/cleanup');
 
 const app = express();
@@ -120,6 +120,9 @@ cron.schedule('0 3 * * *', async () => {
 });
 
 // ── Start server ──
+// Requeue any emails stranded in 'processing' by a crash/restart mid-batch
+recoverOrphanedProcessing().catch(err => console.error('Startup recovery error:', err.message));
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Stroke CRM server running on port ${PORT}`);
   console.log(`   Frontend: http://localhost:${PORT}`);

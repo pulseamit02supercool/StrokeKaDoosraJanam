@@ -192,15 +192,7 @@ router.post('/create', async (req, res) => {
                 
                 const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
                 const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
-                
-                if (hh === 11 && mm === 0) {
-                  const recipientNow = new Date(now.getTime() + offsetMinutes * 60000);
-                  const localSeconds = recipientNow.getUTCHours() * 3600 + recipientNow.getUTCMinutes() * 60 + recipientNow.getUTCSeconds();
-                  if (localSeconds > 11 * 3600) {
-                    wallClockUTC.setUTCDate(wallClockUTC.getUTCDate() + 1);
-                  }
-                }
-                
+
                 sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
                 
                 if (sendAt <= now) {
@@ -261,15 +253,7 @@ router.post('/create', async (req, res) => {
           
           const wallClockUTC = new Date(Date.UTC(y, m, d, hh, mm, 0, 0));
           const offsetMinutes = await resolveTimezoneOffset(recipientTz, wallClockUTC);
-          
-          if (hh === 11 && mm === 0) {
-            const recipientNow = new Date(now.getTime() + offsetMinutes * 60000);
-            const localSeconds = recipientNow.getUTCHours() * 3600 + recipientNow.getUTCMinutes() * 60 + recipientNow.getUTCSeconds();
-            if (localSeconds > 11 * 3600) {
-              wallClockUTC.setUTCDate(wallClockUTC.getUTCDate() + 1);
-            }
-          }
-          
+
           sendAt = new Date(wallClockUTC.getTime() - offsetMinutes * 60000);
           
           if (sendAt <= now) {
@@ -775,6 +759,53 @@ router.get('/diagnostic', async (req, res) => {
       }
     }
 
+    // Reschedule pending initial emails of specific campaigns if requested.
+    // Usage (logged in): /api/campaigns/diagnostic?reschedule_campaigns=<id1>,<id2>&reschedule_to=now
+    // 'now' makes the cron pick them up on its next tick; an ISO datetime is also accepted.
+    let rescheduleLogs = [];
+    if (req.query.reschedule_campaigns) {
+      if (!loggedInUserId || String(loggedInUserId).startsWith('Error')) {
+        rescheduleLogs.push('Cannot reschedule: User not authenticated');
+      } else {
+        const targetIds = String(req.query.reschedule_campaigns).split(',').map(s => s.trim()).filter(Boolean);
+        const toParam = req.query.reschedule_to || 'now';
+        const newTime = toParam === 'now' ? new Date() : new Date(toParam);
+
+        if (isNaN(newTime.getTime())) {
+          rescheduleLogs.push(`Invalid reschedule_to value: ${toParam}`);
+        } else {
+          for (const campId of targetIds) {
+            const { data: ownedCamp } = await supabase
+              .from('campaigns')
+              .select('id')
+              .eq('id', campId)
+              .eq('user_id', loggedInUserId)
+              .single();
+
+            if (!ownedCamp) {
+              rescheduleLogs.push(`Campaign ${campId}: not found or not owned by you, skipped`);
+              continue;
+            }
+
+            const { data: updated, error: reschedErr } = await supabase
+              .from('emails')
+              .update({ status: 'pending', scheduled_at: newTime.toISOString() })
+              .eq('campaign_id', campId)
+              .eq('user_id', loggedInUserId)
+              .eq('is_followup', false)
+              .in('status', ['pending', 'processing'])
+              .select('id');
+
+            if (reschedErr) {
+              rescheduleLogs.push(`Campaign ${campId}: error - ${reschedErr.message}`);
+            } else {
+              rescheduleLogs.push(`Campaign ${campId}: rescheduled ${updated ? updated.length : 0} initial emails to ${newTime.toISOString()}`);
+            }
+          }
+        }
+      }
+    }
+
     // Run repair if requested
     let repairLogs = [];
     let spawnedCount = 0;
@@ -889,6 +920,7 @@ router.get('/diagnostic', async (req, res) => {
       campaigns_user_ids: campaignsUserIds,
       emails_user_ids: emailsUserIds,
       global_repair_candidates_count: globalCandidatesCount,
+      reschedule_logs: rescheduleLogs,
       repair_executed: req.query.run_repair === 'true',
       repair_spawned_count: spawnedCount,
       repair_logs: repairLogs,

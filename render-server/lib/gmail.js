@@ -1,5 +1,8 @@
 const { google } = require('googleapis');
 
+// Abort any Gmail API call that hangs, so a stuck request can't stall the whole send batch
+const GMAIL_TIMEOUT = { timeout: 30000 };
+
 function getOAuthClient(req = null) {
   let redirectUri = '';
   if (process.env.APP_URL) {
@@ -91,7 +94,7 @@ async function sendEmail(accessToken, to, subject, bodyHtml, threadId = null, re
         id: threadId,
         format: 'metadata',
         metadataHeaders: ['Message-ID', 'References', 'Subject']
-      });
+      }, GMAIL_TIMEOUT);
       if (threadRes.data.messages && threadRes.data.messages.length > 0) {
         // Use the exact subject of the original thread to prevent Gmail from breaking the thread
         const firstMsg = threadRes.data.messages[0];
@@ -129,7 +132,7 @@ async function sendEmail(accessToken, to, subject, bodyHtml, threadId = null, re
         raw: raw,
         threadId: threadId || undefined
       }
-    });
+    }, GMAIL_TIMEOUT);
 
     try {
       const msg = await gmail.users.messages.get({
@@ -137,7 +140,7 @@ async function sendEmail(accessToken, to, subject, bodyHtml, threadId = null, re
         id: res.data.id,
         format: 'metadata',
         metadataHeaders: ['Message-ID']
-      });
+      }, GMAIL_TIMEOUT);
       const rfcHeader = msg.data.payload.headers.find(h => h.name.toLowerCase() === 'message-id');
       if (rfcHeader) {
         res.data.rfcMessageId = rfcHeader.value;
@@ -162,7 +165,7 @@ async function checkForReply(accessToken, threadId, senderEmail) {
     const res = await gmail.users.threads.get({
       userId: 'me',
       id: threadId
-    });
+    }, GMAIL_TIMEOUT);
 
     const messages = res.data.messages;
     if (!messages || messages.length <= 1) return false;
