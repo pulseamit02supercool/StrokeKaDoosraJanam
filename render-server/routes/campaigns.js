@@ -745,6 +745,19 @@ router.get('/diagnostic', async (req, res) => {
       .select('*')
       .eq('to_email', 'dipsik@thoughtworks.com');
 
+    // All not-yet-sent emails with their scheduled times, to debug "mails didn't go" reports
+    const { data: pendingAll } = await supabase
+      .from('emails')
+      .select('id, campaign_id, user_id, to_email, status, is_followup, scheduled_at, created_at, error')
+      .in('status', ['pending', 'processing', 'failed'])
+      .order('scheduled_at', { ascending: true })
+      .limit(100);
+
+    // Map user ids to account emails so campaigns can be attributed
+    const { data: usersMap } = await supabase
+      .from('users')
+      .select('id, email');
+
     // Get unique user_ids from tables
     const campaignsUserIds = campaigns ? [...new Set(campaigns.map(c => c.user_id))] : [];
     const emailsUserIds = emails ? [...new Set(emails.map(e => e.user_id))] : [];
@@ -869,6 +882,9 @@ router.get('/diagnostic', async (req, res) => {
       jwt_secret_configured: !!jwtSecret,
       logged_in_user_id: loggedInUserId,
       last_cron_run: global.lastCronRun || null,
+      server_time_utc: new Date().toISOString(),
+      pending_emails_all: pendingAll || [],
+      users_map: usersMap || [],
       dipsik_emails: dipsikEmails || [],
       campaigns_user_ids: campaignsUserIds,
       emails_user_ids: emailsUserIds,
