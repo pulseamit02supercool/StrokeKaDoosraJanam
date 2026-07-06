@@ -730,9 +730,9 @@ router.get('/diagnostic', async (req, res) => {
       .eq('to_email', 'dipsik@thoughtworks.com');
 
     // All not-yet-sent emails with their scheduled times, to debug "mails didn't go" reports
-    const { data: pendingAll } = await supabase
+    const { data: pendingAll, error: pendingAllErr } = await supabase
       .from('emails')
-      .select('id, campaign_id, user_id, to_email, status, is_followup, scheduled_at, created_at, error')
+      .select('id, campaign_id, user_id, to_email, status, is_followup, scheduled_at, error')
       .in('status', ['pending', 'processing', 'failed'])
       .order('scheduled_at', { ascending: true })
       .limit(100);
@@ -915,6 +915,7 @@ router.get('/diagnostic', async (req, res) => {
       last_cron_run: global.lastCronRun || null,
       server_time_utc: new Date().toISOString(),
       pending_emails_all: pendingAll || [],
+      pending_emails_all_error: pendingAllErr ? pendingAllErr.message : null,
       users_map: usersMap || [],
       dipsik_emails: dipsikEmails || [],
       campaigns_user_ids: campaignsUserIds,
